@@ -18,8 +18,6 @@ e.g. http://localhost/batoco.php?input=.\Test_Files\ZMAKEBAS_Test_Labels.bas&l=o
  
 It is functionally equivalent to zmakebas.c though it is mostly written from scratch. It has all the extra features, like labels and shortcuts to embed UDGs.
 
-It doesn't yet support split lines or hex numbers after BIN keywords. 
-
 It also doesn't have the extended features like Spectrum Next, ZX81 support.
  
 It supports these options from the commandline though some are currently non-functional
@@ -49,5 +47,25 @@ and these via URL
     // 3=on                     : output a +3DOS compatible file (default is .tap file).\n";
     // s=<StartNumber>          : in labels mode, set starting line number ";
     // input=<Input filename>   : Name of the file to read and convert
+
+Differences to zmakebas
+
+Hex numbers -
+
+Like zmakebas you can use Hex numbers after a BIN keyword. These are expected to start 0x. However, these are translated back into a binary representation in the outputted file.
+
+E.g.  BIN 0xAA4E will appear in the output as BIN 1010101001001110
+
+Commandline parameters -
+
+The input filename is given as the first parameter not the last parameter
+
+E.g.
+
+zmakebas -l inputfile.bas
+
+PHP batoco.php inputfile.bas -l
+
+Bugs
  
-There will be bugs, when you find them if you can email me the BASIC file I'll see what is broken.
+There will be bugs, when you find them if you can send me the BASIC file I'll see what is broken.
