@@ -14,7 +14,7 @@ e.g. batoco.PHP .\Test_Files\GOTO_Test_Labels.bas -v -L -n GTO-TEST -o GOTOTestP
  
 It can also be called via a URL using POST or GET to send the arguments
  
-e.g. http://localhost/zx_htm2tap/batoco.php?input=.\Test_Files\ZMAKEBAS_Test_Labels.bas&l=on&n=ZMB-TEST&o=ZMAKEBASTestPHP.tap
+e.g. http://localhost/batoco.php?input=.\Test_Files\ZMAKEBAS_Test_Labels.bas&l=on&n=ZMB-TEST&o=ZMAKEBASTestPHP.tap
  
 It is functionally equivalent to zmakebas.c though it is mostly written from scratch. It has all the extra features, like labels and shortcuts to embed UDGs.
 
