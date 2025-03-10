@@ -1177,34 +1177,51 @@ foreach ($basicLines as $CurrentLine)
 
                 //Here the current character is a 1 or 0
                 //Check if next is a x
-                if($CurrentLine[$Ptr]=='0' && strtoupper($CurrentLine[$Ptr])=='X')
+                if($CurrentLine[$Ptr]=='0' && strtoupper($CurrentLine[$Ptr+1])=='X')
                 {
                     //Move on pointer
+                    $TempHexNumber = "";
                     $Ptr += 2;
-                    //TO DO
-                    //Here we can implement using Hex numbers after a BIN statement.
-                    //Step 1. check for a x after a 0 - DONE
-                    //Step 2 read all the letters and numbers off and store them.
-                    //Step 3. Convert to binary $hexadecimal = '0xA37334'; echo base_convert($hexadecimal, 16, 2);
-                    //Step 4. Write binary out to file
-                    //Step 5. Write out the value to file
+                    while(strchr("0123456789AaBbCcDdEeFf",$CurrentLine[$Ptr]))
+                    {
+                        $TempHexNumber = $CurrentLine[$Ptr];
+                        $Ptr++;
+                        if($Ptr >= strlen($CurrentLine))
+                        break;
+                    }
+                    //We should now have a hex number
+                    //Convert hex number to binary and write back into $TempBuffer
+                    $chars = str_split(base_convert($TempHexNumber, 16, 2));
+                    foreach($chars as $char)
+                    {
+                        //Multiply by 2
+                        $TempBinNumber*=2;
+                        //Add the 1 or 0
+                        $TempBinNumber+=(int)$char;
+                        //Write phyiscal number out
+                        if(array_key_exists($char,$Sinclair_Basic))
+                            $TempBuffer[] = $Sinclair_Basic[$char];
+                    }
+                    //Now continue as if we had a binary file.
                 }
-
-
-                while((strcmp($CurrentLine[$Ptr],'0')==0) or (strcmp($CurrentLine[$Ptr],'1')==0))
+                else
                 {
-                    //Multiply by 2
-                    $TempBinNumber*=2;
-                    //Add the 1 or 0
-                    $TempBinNumber+=(int)$CurrentLine[$Ptr];
-                    //Write phyiscal number out
-                    if(array_key_exists($CurrentLine[$Ptr],$Sinclair_Basic))
-                        $TempBuffer[] = $Sinclair_Basic[$CurrentLine[$Ptr]];
-                    //Move to next number
-                    $Ptr++;
-                    if($Ptr >= strlen($CurrentLine))
-                    break;
+                    while((strcmp($CurrentLine[$Ptr],'0')==0) or (strcmp($CurrentLine[$Ptr],'1')==0))
+                    {
+                        //Multiply by 2
+                        $TempBinNumber*=2;
+                        //Add the 1 or 0
+                        $TempBinNumber+=(int)$CurrentLine[$Ptr];
+                        //Write phyiscal number out
+                        if(array_key_exists($CurrentLine[$Ptr],$Sinclair_Basic))
+                            $TempBuffer[] = $Sinclair_Basic[$CurrentLine[$Ptr]];
+                        //Move to next number
+                        $Ptr++;
+                        if($Ptr >= strlen($CurrentLine))
+                        break;
+                    }
                 }
+
                 //Sinclair basic then stores the value of the binary number after the physical representation
                 echo "Temp number = " . $TempBinNumber . PHP_EOL;
                 $exponentMantissaArray = frexp($TempBinNumber);
