@@ -9,6 +9,9 @@
 global $parseOptions;
 global $basicLines;
 
+
+ini_set("auto_detect_line_endings", true);
+
 define("VERSION_NUMBER","0.0.1");
 define("DEFAULT_OUTPUT","out.tap");
 
@@ -798,13 +801,16 @@ if((!$parseOptions->autostartLine == 0x8000) && (($parseOptions->autostartLine <
 if($parseOptions->verboseMode)
     echo "Inputfile name is : ".$parseOptions->inputFilename. " ".PHP_EOL;
 if (!file_exists($parseOptions->inputFilename)) Error('File not found');
+
+$basicLines = file($parseOptions->inputFilename, FILE_IGNORE_NEW_LINES);
 //Open input file and add all the lines to $basicLines array
-$fp = @fopen($parseOptions->inputFilename, 'r'); 
+//$fp = @fopen($parseOptions->inputFilename, 'r'); 
 if($parseOptions->verboseMode)echo "Opening file";
 // Add each line to an array
-if ($fp) {
-   $basicLines = explode(PHP_EOL, fread($fp, filesize($parseOptions->inputFilename)));
-}
+/*if ($fp) {
+   $basicLines = explode("\n", fread($fp, filesize($parseOptions->inputFilename)));
+   //$basicLines = explode(0x0A, fread($fp, filesize($parseOptions->inputFilename)));
+}*/
 if($parseOptions->verboseMode)
 {
 echo "Input file contains: ",count($basicLines)," lines",PHP_EOL;
@@ -1078,11 +1084,12 @@ foreach ($basicLines as $CurrentLine)
                     $TextBuffer=$TextBuffer . $CurrentLine[$Ptr];
                     $Ptr++;
                     if(!($Ptr < strlen($CurrentLine)))
-                    continue 2;
+                    continue;
                 }
 
             }
             
+            if($parseOptions->verboseMode)echo "Current Buffer State: ".strtoupper($TextBuffer).PHP_EOL;
             //Check if REM, if so record keyword and then transfer everything after REM to $TempBuffer and continue
             if(strtoupper($TextBuffer) == "REM")
             {
@@ -1151,6 +1158,7 @@ foreach ($basicLines as $CurrentLine)
                     if(array_key_exists(strtoupper($TextBuffer),$SinclairBasicKeywords))
                         $TempBuffer[] = $SinclairBasicKeywords[strtoupper($TextBuffer)];
                     if($parseOptions->verboseMode)echo "Found keyword: ".strtoupper($TextBuffer).PHP_EOL;
+                    continue;
                 }
                 else
                 {
@@ -1265,42 +1273,67 @@ foreach ($basicLines as $CurrentLine)
                     $Ptr = $TempPtr;
                 }
             }
-
+            
             //Check if matches token array if so write to file
             if(array_key_exists(strtoupper($TextBuffer),$SinclairBasicKeywords))
             {
                 $TempBuffer[] = $SinclairBasicKeywords[strtoupper($TextBuffer)];
                 //Eat one extra space unless the is an opening brace next eg SCREEN$(0,0)
-                if($Ptr < strlen($CurrentLine))
+                /*if($Ptr < strlen($CurrentLine))
                     if(strcmp($CurrentLine[$Ptr],"(" ) == 0)
                         if(array_key_exists("(",$Sinclair_Basic))
-                            $TempBuffer[] = $Sinclair_Basic["("];
-                $Ptr++;
+                            $TempBuffer[] = $Sinclair_Basic["("];*/
+                //Eat up a space if there is a space following
+                if(ctype_space($CurrentLine[$Ptr+1]))
+                    $Ptr++;
                 if($parseOptions->verboseMode)echo "Found keyword: ".strtoupper($TextBuffer).PHP_EOL;
                 continue;
             }
-            //If we are here it must be a variable, check if it is followed by any numbers then write to file
-            //Ignore spaces and suck up any alpha or digits, stop when neither.
-            while((ctype_alpha($CurrentLine[$Ptr])) or (ctype_digit($CurrentLine[$Ptr])) or (ctype_space($CurrentLine[$Ptr])))
-            {
-                if(!(ctype_space($CurrentLine[$Ptr])))
-                {
 
-                    $TextBuffer=$TextBuffer . $CurrentLine[$Ptr];
-                }                
-                $Ptr++;
-                if($Ptr == strlen($CurrentLine))
-                    continue 2;
-            }
-            //Write text buffer to TempBuffer
+            //If we are here it must be a variable
+            //Write what we have to the output file and clear the buffer
+            
             $chars = str_split($TextBuffer,1);
             foreach($chars as $char)
             {
                 if(array_key_exists($char,$Sinclair_Basic))
-                    $TempBuffer[] = $Sinclair_Basic[$char];
+                $TempBuffer[] = $Sinclair_Basic[$char];
             }
-            continue;
 
+            $TextBuffer = "";
+
+            //we might have more of the same variable if it ends in a number or contains spaces e.g. Dog Faced Boy 23 which is legal in Sinclair Basic
+            
+            while((ctype_alpha($CurrentLine[$Ptr])) or (ctype_digit($CurrentLine[$Ptr])) or (ctype_space($CurrentLine[$Ptr])))
+            {
+                if(!(ctype_space($CurrentLine[$Ptr])))
+                {
+                    $TextBuffer=$TextBuffer . $CurrentLine[$Ptr];
+                } 
+                else
+                {
+                    if(array_key_exists(strtoupper($TextBuffer),$SinclairBasicKeywords))
+                    {
+                        $TempBuffer[] = $SinclairBasicKeywords[strtoupper($TextBuffer)];
+                        $TextBuffer = "";
+                    }
+                    else 
+                    {
+                        //The rest should be variable write it out and clear buffer
+                        $chars = str_split($TextBuffer,1);
+                        foreach($chars as $char)
+                        {
+                            if(array_key_exists($char,$Sinclair_Basic))
+                            $TempBuffer[] = $Sinclair_Basic[$char];
+                        }
+                        $TextBuffer = "";
+                    }
+                }              
+                $Ptr++;
+                if($Ptr == strlen($CurrentLine))
+                    //Break here so we can write variable to buffer
+                    break;
+            }
         }
 
         //Hopefully we have dealt with anynumbers on the end of variable names so now convert any variables
@@ -1329,27 +1362,30 @@ foreach ($basicLines as $CurrentLine)
         if(!$InString)
         {
             //Check for awkward characters like <=,>= & <>
-            if(strchr("<>=",$CurrentLine[$Ptr]))
+            if(strchr("<>",$CurrentLine[$Ptr]))
             {
                 switch($CurrentLine[$Ptr])
                 {
                     case "<":
-                        if(strcmp(">",$CurrentLine[$Ptr]))
+                        if(strcmp(">" ,$CurrentLine[$Ptr+1])== 0)
                         {
                             $TempBuffer[] = $Sinclair_Basic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
+                            echo "Ptr =" . $CurrentLine[$Ptr] . "Ptr+1 =" . $CurrentLine[$Ptr+1] . "Sinclairbasic returns: ". $Sinclair_Basic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
                             $Ptr=$Ptr+2;
                             continue 2;
                         }
-                    else if (strcmp("=",$CurrentLine[$Ptr]))
+                    else if (strcmp("=" ,$CurrentLine[$Ptr+1])== 0)
                     {
                         $TempBuffer[] = $Sinclair_Basic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
+                        echo "Ptr =" . $CurrentLine[$Ptr] . "Ptr+1 =" . $CurrentLine[$Ptr+1] . "Sinclairbasic returns: ". $Sinclair_Basic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
                         $Ptr=$Ptr+2;
                         continue 2;
                     }
-                    case "<":
-                        if (strcmp("=",$CurrentLine[$Ptr]))
+                    case ">":
+                        if (strcmp("=" ,$CurrentLine[$Ptr+1])== 0)
                     {
                         $TempBuffer[] = $Sinclair_Basic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
+                        echo "Ptr =" . $CurrentLine[$Ptr] . "Ptr+1 =" . $CurrentLine[$Ptr+1] . "Sinclairbasic returns: ". $Sinclair_Basic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
                         $Ptr=$Ptr+2;
                         continue 2;
                     }
@@ -1408,11 +1444,11 @@ switch($parseOptions->outputFormat)
 /*
 TO DO
 
-IF THEN needs a special case
+IF THEN needs a special case - DONE
 
-IF is48 THEN GOTO is currently reading is48THENGOTO as a variable if there is an IF we need to stop variable reading if there is a THEN with space either side
+IF is48 THEN GOTO is currently reading is48THENGOTO as a variable if there is an IF we need to stop variable reading if there is a THEN with space either side - DONE
 
-This works l$>64, this doesn't l$<64
+This works l$>64, this doesn't l$<64 - DONE
 
 Floats, Binary and Integers insert value - DONE?
 
@@ -1435,5 +1471,7 @@ Add NEXT
 Future
 
 Lambda support, Timex, etc
+
+TZX Support*/
 
 ?>
