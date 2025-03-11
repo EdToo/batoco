@@ -12,7 +12,7 @@ global $basicLines;
 
 ini_set("auto_detect_line_endings", true);
 
-define("VERSION_NUMBER","0.0.1");
+define("VERSION_NUMBER","0.0.8");
 define("DEFAULT_OUTPUT","out.tap");
 
 $SinclairBasicKeywords = array(
@@ -1337,7 +1337,7 @@ foreach ($basicLines as $CurrentLine)
         }
 
         //Hopefully we have dealt with anynumbers on the end of variable names so now convert any variables
-        if(ctype_digit($CurrentLine[$Ptr]) or $CurrentLine[$Ptr] == ".")
+        if(!$InString && (ctype_digit($CurrentLine[$Ptr]) or $CurrentLine[$Ptr] == "."))
         {
             $TempNumberBuffer="";
             while(ctype_digit($CurrentLine[$Ptr]) or (strcmp($CurrentLine[$Ptr], ".") == 0) or (strcmp($CurrentLine[$Ptr], "e")==0))
