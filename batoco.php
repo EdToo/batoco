@@ -1192,12 +1192,13 @@ foreach ($basicLines as $CurrentLine)
                     $Ptr += 2;
                     while(strchr("0123456789AaBbCcDdEeFf",$CurrentLine[$Ptr]))
                     {
-                        $TempHexNumber = $CurrentLine[$Ptr];
+                        $TempHexNumber = $TempHexNumber . $CurrentLine[$Ptr];
                         $Ptr++;
                         if($Ptr >= strlen($CurrentLine))
                         break;
                     }
                     //We should now have a hex number
+                    if($parseOptions->verboseMode)echo "Found hex number: ".strtoupper($TempHexNumber).PHP_EOL;
                     //Convert hex number to binary and write back into $TempBuffer
                     $chars = str_split(base_convert($TempHexNumber, 16, 2));
                     foreach($chars as $char)
