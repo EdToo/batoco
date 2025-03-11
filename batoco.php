@@ -12,7 +12,7 @@ global $basicLines;
 
 ini_set("auto_detect_line_endings", true);
 
-define("VERSION_NUMBER","0.0.8");
+define("VERSION_NUMBER","0.0.9");
 define("DEFAULT_OUTPUT","out.tap");
 
 $SinclairBasicKeywords = array(
@@ -1312,10 +1312,15 @@ foreach ($basicLines as $CurrentLine)
                 } 
                 else
                 {
+                    //Check if we have reached a key word
                     if(array_key_exists(strtoupper($TextBuffer),$SinclairBasicKeywords))
                     {
+                        if($parseOptions->verboseMode)echo "Found keyword while searching variables: ".strtoupper($TextBuffer).PHP_EOL;
                         $TempBuffer[] = $SinclairBasicKeywords[strtoupper($TextBuffer)];
                         $TextBuffer = "";
+                        if($Ptr+1 < strlen($CurrentLine))
+                            $Ptr++;
+                        continue 2;
                     }
                     else 
                     {
