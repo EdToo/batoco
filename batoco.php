@@ -12,7 +12,7 @@ global $basicLines;
 
 ini_set("auto_detect_line_endings", true);
 
-define("VERSION_NUMBER","0.0.9");
+define("VERSION_NUMBER","0.0.10");
 define("DEFAULT_OUTPUT","out.tap");
 
 $SinclairBasicKeywords = array(
@@ -1128,7 +1128,10 @@ foreach ($basicLines as $CurrentLine)
                 {
                     $TextBuffer=$TextBuffer . $TextBuffer2;
                     if(array_key_exists(strtoupper($TextBuffer),$SinclairBasicKeywords))
+                    {
                         $TempBuffer[] = $SinclairBasicKeywords[strtoupper($TextBuffer)];
+                        $TextBuffer = "";
+                    }
                     if($parseOptions->verboseMode)echo "Found keyword: ".strtoupper($TextBuffer).PHP_EOL;
                     $Ptr++;
                     continue;
@@ -1279,6 +1282,7 @@ foreach ($basicLines as $CurrentLine)
             if(array_key_exists(strtoupper($TextBuffer),$SinclairBasicKeywords))
             {
                 $TempBuffer[] = $SinclairBasicKeywords[strtoupper($TextBuffer)];
+                $TextBuffer = "";
                 //Eat one extra space unless the is an opening brace next eg SCREEN$(0,0)
                 /*if($Ptr < strlen($CurrentLine))
                     if(strcmp($CurrentLine[$Ptr],"(" ) == 0)
@@ -1310,6 +1314,8 @@ foreach ($basicLines as $CurrentLine)
                 if(!(ctype_space($CurrentLine[$Ptr])))
                 {
                     $TextBuffer=$TextBuffer . $CurrentLine[$Ptr];
+                    if($parseOptions->verboseMode)echo "Start of variable output ptr value: ".$CurrentLine[$Ptr].PHP_EOL;
+                    if($parseOptions->verboseMode)echo "Start of variable output TestBuffer: ".$TextBuffer.PHP_EOL;
                 } 
                 else
                 {
@@ -1326,6 +1332,8 @@ foreach ($basicLines as $CurrentLine)
                     else 
                     {
                         //The rest should be variable write it out and clear buffer
+                        
+                        if($parseOptions->verboseMode)echo "Writing TestBuffer: ".$TextBuffer.PHP_EOL;
                         $chars = str_split($TextBuffer,1);
                         foreach($chars as $char)
                         {
@@ -1337,11 +1345,20 @@ foreach ($basicLines as $CurrentLine)
                 }              
                 $Ptr++;
                 if($Ptr == strlen($CurrentLine))
+                {
                     //Break here so we can write variable to buffer
                     break;
+                }
             }
         }
-
+        //Flush buffer
+        $chars = str_split($TextBuffer,1);
+        foreach($chars as $char)
+        {
+            if(array_key_exists($char,$Sinclair_Basic))
+            $TempBuffer[] = $Sinclair_Basic[$char];
+        }
+        $TextBuffer = "";
         //Hopefully we have dealt with anynumbers on the end of variable names so now convert any variables
         if(!$InString && (ctype_digit($CurrentLine[$Ptr]) or $CurrentLine[$Ptr] == "."))
         {
