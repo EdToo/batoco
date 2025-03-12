@@ -1285,7 +1285,7 @@ foreach ($basicLines as $CurrentLine)
                         if(array_key_exists("(",$Sinclair_Basic))
                             $TempBuffer[] = $Sinclair_Basic["("];*/
                 //Eat up a space if there is a space following
-                if(ctype_space($CurrentLine[$Ptr+1]))
+                if(ctype_space($CurrentLine[$Ptr]))
                     $Ptr++;
                 if($parseOptions->verboseMode)echo "Found keyword: ".strtoupper($TextBuffer).PHP_EOL;
                 continue;
