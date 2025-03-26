@@ -32,7 +32,8 @@ It supports these options from the commandline though some are currently non-fun
     // p=on                     : output .p instead (set ZX81 mode).\n";
     // r=on                     : output raw headerless file (default is .tap file).\n";
     // 3=on                     : output a +3DOS compatible file (default is .tap file).\n";
-    // s=<StartNumber>          :in labels mode, set starting line number ";
+    // s=<StartNumber>          : in labels mode, set starting line number ";
+    // m=<Machine>              : Select machine to output for from ZX80,ZX81,Lambda,Timex,Spectrum,Plus3
  
 and these via URL
  
@@ -46,7 +47,8 @@ and these via URL
     // r=on                     : output raw headerless file (default is .tap file).\n";
     // 3=on                     : output a +3DOS compatible file (default is .tap file).\n";
     // s=<StartNumber>          : in labels mode, set starting line number ";
-    // input=<Input filename>   : Name of the file to read and convert
+    // input=<Input filename>   : Name of the file to read and convert;
+    // m=<Machine>              : Select machine to output for from ZX80,ZX81,Lambda,Timex,Spectrum,Plus3
 
 Differences to zmakebas
 
