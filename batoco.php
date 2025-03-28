@@ -2,7 +2,7 @@
 // BATOCO (C) Taskmaster Software 2025 - This code is released under the GPL v3 license
 // Uses code from UTO's drb.php from DAAD Ready
 // Uses inspiration and some converted code from zmakebas.c by Russell Marks, 1998
-// and zxtext2p.c by Chris Cowley
+// zxtext2p.c by Chris Cowley and A ZX81 BASIC to P-File Converter by maziac
 
 //This code isn't designed to be efficient, but aiming for clarity so I can remember what it is supposed to do
 //twenty years from now
@@ -56,7 +56,7 @@ function frexp ( $number, $machineType )
     
     $returnArray = array();
     //Check if not a float and between -65535 and 65535
-    if($number==(int)$number && $number>=-65535 && $number<=65535 && (!$machineType=="ZX81") or $machineType == "ZX80")//NOTE ZX81 only stores variables as floats
+    if(($number==(int)$number && $number>=-65535 && $number<=65535 && $machineType!="ZX81") or $machineType == "ZX80")//NOTE ZX81 only stores variables as floats
     {
         /*There is an alternative way of storing whole numbers between -65535 and +65535:
 
@@ -77,10 +77,9 @@ function frexp ( $number, $machineType )
     else
     {
         $exponent = ( floor(log($number, 2)) + 1 );
-        //echo "Exponent = " . $exponent;
         if($exponent<-128 || $exponent>127) 
         {
-            Error("Exponent out of range (number too big).");
+            Error("Exponent out of range (number too big). Exponent = ".$exponent);
         };
         $mantissa = ( $number * pow(2, -$exponent) );
         //$mantissa = floor ( ($number/pow(2,$exponent) - 1) * 0x80000000 + 0.5);
@@ -555,7 +554,7 @@ function prependZX81TapeHeader(&$parseOptions,$sinclairBasic)
     $header[49] = 0x18;                             // S_POSN y    - Row number for print position
     $header[50] = 0x40;                             // CDFLAG      - Various flags. Bit 7 is set during SLOW mode, Bit 6 is the true fast/slow flag
     $header[83] = 118;                              // PRBUF      - Printer buffer (33 bytes, 33rd is NEWLINE)
-    echo var_dump($header);
+    //TESTing purposes only echo var_dump($header);
     // Dump header
     for ($i=0;$i<116;$i++) fputs($outputHandle, chr($header[$i]), 1);
 
@@ -574,8 +573,18 @@ function prependZX81TapeHeader(&$parseOptions,$sinclairBasic)
         //If D_FILE isn't collapsed fill with zeros
         if($parseOptions->full_D_FILE)
         {
-            for ($j= 0; $j< 32; $j++)
-                fputs($outputHandle,chr(0x00), 1);
+            //Check if D_FILE has content
+            if($i<count($parseOptions->D_FILE))
+            {
+                //We have content so output it to currentline
+                foreach ( $parseOptions->D_FILE AS $D_BYTE )
+                    fputs($outputHandle,chr($D_BYTE), 1);
+            }
+            else
+            {
+                for ($j= 0; $j< 32; $j++)
+                    fputs($outputHandle,chr(0x00), 1);
+            }
         }
         
         fputs($outputHandle,chr(0x76), 1);
@@ -1980,9 +1989,10 @@ echo "Input file contains: ",count($basicLines)," lines",PHP_EOL;
 $Linenum=0;
 
 
-$CurrentLinenum=0;
+$currentLineNum=0;
 $TempBuffer = [];
 $TempString = "";
+$unSetLines=false;
 
 //First pass clean up input and sort labels
 if($parseOptions->useLabels) $Linenum=$parseOptions->setLabelsModeStartLineNumber;
@@ -1990,14 +2000,15 @@ $LabelNumberArray = [];
 foreach ($basicLines as $CurrentLine)
 {
     
-    if($parseOptions->verboseMode)echo "Current line number: ",$CurrentLinenum," Current Linenumber to write: ",$Linenum,PHP_EOL;
+    $TempBuffer = [];
+    if($parseOptions->verboseMode)echo "Current line number: ",$currentLineNum," Current Linenumber to write: ",$Linenum,PHP_EOL;
     $Ptr = 0;   
     //Delete all empty lines
     if (strlen(trim($CurrentLine)) === 0) 
     {
-        unset( $basicLines[$CurrentLinenum] );
-        if($parseOptions->verboseMode)echo "Unset: ",$CurrentLinenum,PHP_EOL;
-        $CurrentLinenum++;
+        unset( $basicLines[$currentLineNum] );
+        if($parseOptions->verboseMode)echo "Unset: ",$currentLineNum,PHP_EOL;
+        $currentLineNum++;
         continue;
     }
 
@@ -2005,9 +2016,9 @@ foreach ($basicLines as $CurrentLine)
     //If last character of the line equals \\ then append next line to this one and delete next line
     if($CurrentLine[strlen($CurrentLine)-1] == '\\')
     {
-        $basicLines[$CurrentLinenum] = $basicLines[$CurrentLinenum] . ltrim($basicLines[$CurrentLinenum+1]);
-        unset( $basicLines[$CurrentLinenum+1] );
-        if($parseOptions->verboseMode)echo "Split line detected. next line unset: ",$CurrentLinenum,PHP_EOL;
+        $basicLines[$currentLineNum] = $basicLines[$currentLineNum] . ltrim($basicLines[$currentLineNum+1]);
+        unset( $basicLines[$currentLineNum+1] );
+        if($parseOptions->verboseMode)echo "Split line detected. next line unset: ",$currentLineNum,PHP_EOL;
     }
 
     //Walk the line skipping empty spaces 
@@ -2026,7 +2037,7 @@ foreach ($basicLines as $CurrentLine)
             if($parseOptions->useLabels)
             {
                 //Line number used when in label mode
-                Error("Line: " . $CurrentLinenum . " Line number used in label mode.");
+                Error("Line: " . $currentLineNum . " Line number used in label mode.");
                 //Kind of unnecessary as we exited above already
                 break;
             }
@@ -2034,7 +2045,7 @@ foreach ($basicLines as $CurrentLine)
             else break;
         case "#": 
             //Delete lines starting with # as they are shell comments
-            if($CurrentLine[$Ptr]+1 == "!")
+            if($CurrentLine[$Ptr+1] == "!")
             {
                 //If a line starts with '#!', it is a special comment that can define additional properties for the P-File generation.
 
@@ -2074,51 +2085,100 @@ foreach ($basicLines as $CurrentLine)
                 //#!machine-not=ZX81
 
                 //These comments are not nestable
-                $Ptr++;
-                while(!ctype_punct($CurrentLine[$Ptr]) or $CurrentLine[$Ptr] != "-")
+                $Ptr=$Ptr+2;
+                while((($CurrentLine[$Ptr]!= " ") or ($CurrentLine[$Ptr] != "=") or ($CurrentLine[$Ptr] != ":")) and $Ptr<strlen($CurrentLine))
                 {
                     $TempBuffer[] = $CurrentLine[$Ptr];
                     $Ptr++;
                 }
+                
+                if($parseOptions->verboseMode)echo strtoupper(implode($TempBuffer)).PHP_EOL;
                 switch(strtoupper(implode($TempBuffer)))
                 {
                     case "BASIC-START":
                         if($parseOptions->autostartLine == 0x8000)
                         { 
-                            Warning("AutoStart line set by parameters, about to be overridden in Line no".$CurrentLine);
+                            Warning("AutoStart line set by parameters, about to be overridden in Line no".$currentLineNum);
                             //Set $parseOptions->autostartLine to number given
+                            $parseOptions->autostartLine=(int)preg_replace('/[^0-9]/', '', $CurrentLine);
+                            if($parseOptions->verboseMode)echo "Machine Type is ".$parseOptions->machineType.". Setting autostart line, Line No. ".$currentLineNum.PHP_EOL;
                         }
                         break;
                     case "DFILE":
-                            //Add contents after : to a new line of the D_FILE
+                        //Add contents after : to a new line of the D_FILE
+                        $Ptr++; //Skip :
+                        $parseOptions->full_D_FILE = true;
+                        $TempBuffer=[];
+                        while($Ptr < strlen($CurrentLine))
+                        {
+                            $TempBuffer[] = $sinclairBasic[$CurrentLine[$Ptr]];
+                            $Ptr++;
+                        }
+                        //Check line length
+                        if($Ptr>=32)
+                            Error("Line is too long for D_FILE line. Line No. ".$currentLineNum);
+                        //Pad line to 32 characters
+                        else while($Ptr<32)
+                             $TempBuffer[] = $sinclairBasic[" "];
+                        //Pad line
+                        $parseOptions->D_FILE = implode($TempBuffer);
+                        
+                        if($parseOptions->verboseMode)echo "Machine Type is ".$parseOptions->machineType.". Adding line to D_FILE, Line No. ".$currentLineNum.PHP_EOL;
                         break;
-                    case "DFILE-COLLAPSED":
+                    case "DFILE-COLLAPSED": 
+                        //Check if D_FILE is actually empty if not warn that d_file is not empty
+                        if(!count($parseOptions->D_FILE) === 0)
+                            Warning("D_FILE collapse requested, but D_FILE has content. Request ignored, Line No. ".$currentLineNum);
+                        else
                             //Set D_FILE collapsed
-                            //Check if D_FILE is actually empty if not warn that dile is collapsed but not empty
+                            $parseOptions->full_D_FILE = false;
+                        
+                        if($parseOptions->verboseMode)echo "Machine Type is ".$parseOptions->machineType.". Collapsing D_FILE, Line No. ".$currentLineNum.PHP_EOL;
                         break;
                     case "MACHINE":
                         //Get list of machines
-                        
+                        $MachineList=explode(",",strtoupper(substring($CurrentLine,$Ptr+1)));
                         //Check if current machine is in specified list
-                        //If so check if this is a not case
-
-                        //For a not case unset everyline until end-machine
-
-                        //For an include case just need to remove end-machine
-
+                        if(in_array($parseOptions->machineType,$MachineList))
+                        {
+                            if($parseOptions->verboseMode)echo "Machine in include list Line No. ".$currentLineNum.PHP_EOL;
+                            //For an include case just need to remove end-machine, so nothing more to do
+                            if($parseOptions->verboseMode)echo "Machine Type is ".$parseOptions->machineType.". In array, Line No. ".$currentLineNum.PHP_EOL;
+                        }
+                        else
+                        {
+                            //Need to unset everything up to end-machine
+                            $unSetLines=true;
+                        }
                         //Need to remember to remove end-machine line from listing
                         break;
+                    case "MACHINE-NOT":
+                        //Get list of machines
+                        $MachineList=explode(",",strtoupper(substring($CurrentLine,$Ptr+1)));
+                        if(!in_array($parseOptions->machineType,$MachineList))
+                        {
+                            if($parseOptions->verboseMode)echo "Machine in exclude list Line No. ".$currentLineNum.PHP_EOL;
+                            
+                            if($parseOptions->verboseMode)echo "Machine Type is ".$parseOptions->machineType.". Not in array, Line No. ".$currentLineNum.PHP_EOL;
+                            //For a not case unset everyline until end-machine
+                            $unSetLines=true;
+                        }
+                        else
+                        {
+                            $unSetLines=false;
+                        }
+                        break;
                     case "END-MACHINE":
-                        //This should have been eaten by the case above so if here given warning
-                        Warning("#!end-machine found without a matching #!machine. Line no. ".$CurrentLine);
+                        $unSetLines = false;
+                        if($parseOptions->verboseMode)echo "Machine Type is ".$parseOptions->machineType.". End machine, Line No. ".$currentLineNum.PHP_EOL;
                         break;
                 }
                 //Now remove line from listing
-                unset( $basicLines[$CurrentLinenum] );
+                unset( $basicLines[$currentLineNum] );
             }
             else
             {
-                unset( $basicLines[$CurrentLinenum] );
+                unset( $basicLines[$currentLineNum] );
             }
             break;
         case "@":
@@ -2130,12 +2190,12 @@ foreach ($basicLines as $CurrentLine)
                 {
                     if($TempPos < $Ptr)
                     {
-                        Error("Line: " . $CurrentLinenum . "Label end tag ':' occurs before label start tag '@'");
+                        Error("Line: " . $currentLineNum . "Label end tag ':' occurs before label start tag '@'");
                     }
                 }
                 else
                 {
-                    Error("Line: " . $CurrentLinenum . "Incomplete token definition, label should close with an end tag ':'");
+                    Error("Line: " . $currentLineNum . "Incomplete token definition, label should close with an end tag ':'");
                 }
                 $TempBuffer[] = $CurrentLine[$Ptr];
                 $Ptr++;
@@ -2146,46 +2206,52 @@ foreach ($basicLines as $CurrentLine)
                 }
                 //Check if label has been used before
                 if (array_key_exists(implode($TempBuffer), $LabelNumberArray))
-                    Error("Line: " . $CurrentLinenum . "Attempt to redefine label" . implode($TempBuffer));
+                    Error("Line: " . $currentLineNum . "Attempt to redefine label" . implode($TempBuffer));
                 $LabelNumberArray[implode($TempBuffer)] = $Linenum;
                 $TempBuffer = [];
             }
             //Now delete line whether we are using labels or not
-            unset( $basicLines[$CurrentLinenum] );
+            unset( $basicLines[$currentLineNum] );
 
 
             break;
         default:
-            //If we are here it should be a line of code so if using labels add line number
+            //If we are here it should be a line of code check if it needs deleting
+            if($unSetLines==true)
+            {
+                unset( $basicLines[$currentLineNum] );
+                break;
+            }
+            // If using labels add line number
             if($parseOptions->useLabels)
             {
                 $TempString = (string)$Linenum . " " . $CurrentLine;
-                $basicLines[$CurrentLinenum] = $TempString;
+                $basicLines[$currentLineNum] = $TempString;
                 
-                if($parseOptions->verboseMode)echo "Processed: ",$CurrentLinenum,PHP_EOL;
+                if($parseOptions->verboseMode)echo "Processed: ",$currentLineNum,PHP_EOL;
                 //If using labels increment linenumber
                 if($parseOptions->useLabels) $Linenum = $Linenum+$parseOptions->setLabelModeIncrement; 
             }
     }
-    $CurrentLinenum++;
+    $currentLineNum++;
 }
 $basicLines = array_values( $basicLines );
 
 
 echo "\n\n";
-$CurrentLinenum = 0;
+$currentLineNum = 0;
 //We now need a second pass to replace labels with line numbers
 if($parseOptions->useLabels)
 {
     $Ptr = 0; 
     foreach ($basicLines as $CurrentLine)
     {
-        $basicLines[$CurrentLinenum] = strReplaceAssoci($LabelNumberArray,$CurrentLine);
-        $CurrentLinenum++;
+        $basicLines[$currentLineNum] = strReplaceAssoci($LabelNumberArray,$CurrentLine);
+        $currentLineNum++;
     } 
 }
 
-$CurrentLinenum = 0;
+$currentLineNum = 0;
 $Linenum = 0;
 $TempPtr = 0;
 //var_dump($basicLines);
@@ -2198,7 +2264,7 @@ foreach ($basicLines as $CurrentLine)
 {
     
     echo "=";
-    $CurrentLinenum++;
+    $currentLineNum++;
     $LastLinenum=$Linenum;
     
     //Create TempOutputLine String to hold the contents to write to the output file.
@@ -2213,7 +2279,7 @@ foreach ($basicLines as $CurrentLine)
         while(ctype_space($CurrentLine[$Ptr])) $Ptr++;
         if(!ctype_digit($CurrentLine[$Ptr]))
         {
-            Error("line: " . $CurrentLinenum ." missing line number");
+            Error("line: " . $currentLineNum ." missing line number");
         }
         //Keep reading until not a digit
         for($Ptr; $Ptr < $CurrentLineLength; $Ptr++)
@@ -2231,12 +2297,12 @@ foreach ($basicLines as $CurrentLine)
         //Check line number has increased
         if($Linenum<=$LastLinenum)
         {
-            Error("line: " . $CurrentLinenum . " line no. not greater than previous one");
+            Error("line: " . $currentLineNum . " line no. not greater than previous one");
         }
     //SaNiTy check
     if($Linenum<0 || $Linenum>9999)
     {
-          Error("line: ".$CurrentLinenum." line no. out of range, should be 1 - 9999, found ".$Linenum.PHP_EOL);
+          Error("line: ".$currentLineNum." line no. out of range, should be 1 - 9999, found ".$Linenum.PHP_EOL);
     }
     //Write line number to buffer, MSB first, LSB second
     $TempBuffer[] = ($Linenum  & 0xff00) >> 8;
@@ -2303,7 +2369,7 @@ foreach ($basicLines as $CurrentLine)
                                     continue 3;
                                     break;
                                 default:
-                                    Warning("line: " . $CurrentLinenum .  "unknown escape charater  " . $CurrentLine[$Ptr] . $CurrentLine[$Ptr+1] . " inserting literally");
+                                    Warning("line: " . $currentLineNum .  "unknown escape charater  " . $CurrentLine[$Ptr] . $CurrentLine[$Ptr+1] . " inserting literally");
                                     $TempBuffer[] =  $CurrentLine[$Ptr];
                                     $TempBuffer[] =  $CurrentLine[$Ptr+1];
                                     $Ptr = $Ptr + 2;
@@ -2470,7 +2536,7 @@ foreach ($basicLines as $CurrentLine)
                 //We are expecting a 1 or 0 after a BIN
                 if($CurrentLine[$Ptr]!='0' && $CurrentLine[$Ptr]!='1')
                 {
-                    Error("line: ". $CurrentLinenum . "Bad BIN number" . PHP_EOL);
+                    Error("line: ". $currentLineNum . "Bad BIN number" . PHP_EOL);
                 }
 
                 //Here the current character is a 1 or 0
@@ -2522,7 +2588,7 @@ foreach ($basicLines as $CurrentLine)
                 }
 
                 //Sinclair basic then stores the value of the binary number after the physical representation
-                echo "Temp number = " . $TempBinNumber . PHP_EOL;
+                if($parseOptions->verboseMode)echo "Temp number = " . $TempBinNumber . PHP_EOL;
                 $exponentMantissaArray = frexp($TempBinNumber,$parseOptions->machineType);
                 foreach($exponentMantissaArray as $element)
                 {
@@ -2724,7 +2790,7 @@ foreach ($basicLines as $CurrentLine)
                 if($Ptr >= strlen($CurrentLine))
                     break;
             }
-            echo "Temp number buffer =".$TempNumberBuffer .PHP_EOL;
+            if($parseOptions->verboseMode)echo "Temp number buffer =".$TempNumberBuffer .PHP_EOL;
             $exponentMantissaArray = frexp(floatval($TempNumberBuffer),$parseOptions->machineType);
             foreach($exponentMantissaArray as $element)
             {
@@ -2745,14 +2811,14 @@ foreach ($basicLines as $CurrentLine)
                         if(strcmp(">" ,$CurrentLine[$Ptr+1])== 0)
                         {
                             $TempBuffer[] = $sinclairBasic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
-                            echo "Ptr =" . $CurrentLine[$Ptr] . "Ptr+1 =" . $CurrentLine[$Ptr+1] . "Sinclairbasic returns: ". $sinclairBasic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
+                            if($parseOptions->verboseMode)echo "Ptr =" . $CurrentLine[$Ptr] . "Ptr+1 =" . $CurrentLine[$Ptr+1] . "Sinclairbasic returns: ". $sinclairBasic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
                             $Ptr=$Ptr+2;
                             continue 2;
                         }
                     else if (strcmp("=" ,$CurrentLine[$Ptr+1])== 0)
                     {
                         $TempBuffer[] = $sinclairBasic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
-                        echo "Ptr =" . $CurrentLine[$Ptr] . "Ptr+1 =" . $CurrentLine[$Ptr+1] . "Sinclairbasic returns: ". $sinclairBasic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
+                        if($parseOptions->verboseMode)echo "Ptr =" . $CurrentLine[$Ptr] . "Ptr+1 =" . $CurrentLine[$Ptr+1] . "Sinclairbasic returns: ". $sinclairBasic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
                         $Ptr=$Ptr+2;
                         continue 2;
                     }
@@ -2760,7 +2826,7 @@ foreach ($basicLines as $CurrentLine)
                         if (strcmp("=" ,$CurrentLine[$Ptr+1])== 0)
                     {
                         $TempBuffer[] = $sinclairBasic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
-                        echo "Ptr =" . $CurrentLine[$Ptr] . "Ptr+1 =" . $CurrentLine[$Ptr+1] . "Sinclairbasic returns: ". $sinclairBasic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
+                        if($parseOptions->verboseMode)echo "Ptr =" . $CurrentLine[$Ptr] . "Ptr+1 =" . $CurrentLine[$Ptr+1] . "Sinclairbasic returns: ". $sinclairBasic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
                         $Ptr=$Ptr+2;
                         continue 2;
                     }
@@ -2789,9 +2855,9 @@ foreach ($basicLines as $CurrentLine)
     {
         for($x = 0; $x < count($TempBuffer); $x++)
         {
-            echo $TempBuffer[$x] . " ";
+            if($parseOptions->verboseMode)echo $TempBuffer[$x] . " ";
         }
-        echo  " String length: " . count($TempBuffer) . PHP_EOL;
+        if($parseOptions->verboseMode)echo  " String length: " . count($TempBuffer) . PHP_EOL;
     }
     //Write to file byte by byte
     for($x = 0; $x < count($TempBuffer); $x++)
