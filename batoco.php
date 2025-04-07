@@ -1,8 +1,10 @@
 <?php
 // BATOCO (C) Taskmaster Software 2025 - This code is released under the GPL v3 license
 // Uses code from UTO's drb.php from DAAD Ready
-// Uses inspiration and some converted code from zmakebas.c by Russell Marks, 1998
-// zxtext2p.c by Chris Cowley and A ZX81 BASIC to P-File Converter by maziac
+// Uses inspiration and some converted code from zxmakebas.c by Russell Marks, 1998
+// zxtext2p.c by Chris Cowley
+// A ZX81 BASIC to P-File Converter by maziac
+// Lambatext2p by Xavsnap
 
 //This code isn't designed to be efficient, but aiming for clarity so I can remember what it is supposed to do
 //twenty years from now
@@ -18,10 +20,13 @@ global $basicLines;
 
 ini_set("auto_detect_line_endings", true);
 
-define("VERSION_NUMBER","0.1.8");
+define("VERSION_NUMBER","0.1.9");
 define("DEFAULT_OUTPUT","out.tap");
 define("DEFAULT_OUTPUT_81","out.p");
 define("DEFAULT_OUTPUT_80","out.o");
+define("DEFAULT_EXTENSION","tap");
+define("DEFAULT_EXTENSION_81","p");
+define("DEFAULT_EXTENSION_80","o");
 
 
 
@@ -38,19 +43,8 @@ function strReplaceAssoc(array $replace, $subject) {
     return str_ireplace(array_keys($replace), array_values($replace), $subject);    
  
  }
- /* dbl2spec() converts a double to an inline-basic-style speccy FP number.
- *
- * usage: dbl2spec(num,&exp,&man);
- *
- * num is double to convert.
- * pexp is an int * to where to return the exponent byte.
- * pman is an unsigned long * to where to return the 4 mantissa bytes.
- * bit 31 is bit 7 of the 0th (first) mantissa byte, and bit 0 is bit 0 of
- * the 3rd (last). As such, the unsigned long returned *must* be written
- * to whatever file in big-endian format to make any sense to a speccy.
- *
- * returns 1 if ok, 0 if exponent too big.
- */
+
+
 function frexp ( $number, $machineType ) 
 {
     
@@ -76,27 +70,55 @@ function frexp ( $number, $machineType )
     }
     else
     {
-        $exponent = ( floor(log($number, 2)) + 1 );
-        if($exponent<-128 || $exponent>127) 
-        {
+        $number = abs($number);
+        $exponent = 0;
+        
+        // Normalize the number
+        while ($number >= 1.0) {
+            $number /= 2.0;
+            $exponent++;
+        }
+        
+        while ($number != 0 && $number < 0.5) {
+            $number *= 2.0;
+            $exponent--;
+        }
+        
+        if ($exponent < -128 || $exponent > 127) {
             Error("Exponent out of range (number too big). Exponent = ".$exponent);
-        };
-        $mantissa = ( $number * pow(2, -$exponent) );
-        //$mantissa = floor ( ($number/pow(2,$exponent) - 1) * 0x80000000 + 0.5);
-        //echo "Mantissa = " . $mantissa;
-        $mantissaArray = unpack("c*", pack("f", $mantissa));
-        //Reset sign bit
-        $mantissa = $mantissa & 0x7fffffff;
+        }
+        
+        if ($number != 0) {
+            $exponent = 128 + $exponent;
+        }
+        $number *= 2.0;
+        $mantissa = 0;
+        
+        for ($f = 0; $f < 32; $f++) {
+            $mantissa = ($mantissa << 1) | intval($number);
+            $number -= (int) intval($number);
+            $number *= 2.0;
+        }
+        /* Now, if (int)num is non-zero (well, 1) then we should generally
+         * round up 1. We don't do this if it would cause an overflow in the
+         * mantissa, though.
+         */
+
+         if (intval($number) && $mantissa != 0xFFFFFFFF) $mantissa++;
+
+         /* finally, zero out the top bit */
+         $mantissa &= 0x7FFFFFFF;
+        
         //A numerical constant in the program is followed by its binary form, using the character CHR$ 14 followed by five bytes for the number itself.
         if($machineType=="ZX81")
             $returnArray[] = 0X7E;
         else
             $returnArray[] = 0x0E; 
-        $returnArray[] = 0x80+$exponent;
-        $returnArray[] = $mantissaArray[4];
-        $returnArray[] = $mantissaArray[3];
-        $returnArray[] = $mantissaArray[2];
-        $returnArray[] = $mantissaArray[1];
+        $returnArray[] = $exponent; //Zero has a special representation in which all 5 bytes are 0.
+        $returnArray[] = ($mantissa & 0xFF000000) >> 24;
+        $returnArray[] = ($mantissa & 0xFF0000) >> 16;
+        $returnArray[] = ($mantissa & 0xFF00) >> 8; 
+        $returnArray[] = $mantissa & 0XFF;
 
     }
     return $returnArray;
@@ -106,37 +128,40 @@ function frexp ( $number, $machineType )
 
 //================================================================= end helper functions =================================================
 function usageHelp() {
-    echo "zmakebas.php - public domain by TaskmasterSoftware.\n\n";
+    echo "batoco.php - public domain by TaskmasterSoftware.\n\n";
 
-    echo "usage: php zmakebas [input_file] [-hlpr3v(vn)] [-a line] [-i incr] [-n speccy_filename]\n";
+    echo "usage: php batoco [input_file] [-hlpr3v(vn)] [-a line] [-i incr] [-n speccy_filename]\n";
     echo "                [-o output_file] [-s line]\n\n";
-
+    echo "Informational Flags";
     echo "        -vn     output version number.\n";
-    echo "        -v      verbose mode.\n";
-    echo "        -a      set auto-start line of basic file (default none).\n";
     echo "        -h      give this usage help.\n";
+    echo "        -v      verbose mode.\n";
+    echo "Label-related Flags";
     echo "        -i      in labels mode, set line number incr. (default 2).\n";
     echo "        -l      use labels rather than line numbers.\n";
+    echo "        -s      in labels mode, set starting line number.\n";
+    echo "Settings Flags";
+    echo "        -m      set machine type, must be followed by one of these options SPECTRUM, LAMBDA, ZX80, ZX81, TIMEX, PLUS3, NEXT";
+    echo "        -a      set auto-start line of basic file (default none).\n";
     echo "        -n      set Spectrum filename (to be given in tape header).\n"; 
     echo "        -o      specify output file (default",DEFAULT_OUTPUT,").\n";
-    echo "        -p      output .p instead (set ZX81 mode).\n";
     echo "        -r      output raw headerless file (default is .tap file).\n";
+    echo "        -z      output TZX file(only supported for SPECTRUM and TIMEX.\n";
+    echo "Deprecated Flags";
     echo "        -3      output a +3DOS compatible file (default is .tap file).\n";
-    echo "        -s      in labels mode, set starting line number.\n";
-    echo "        -m      set machine type, must be followed by one of these options SPECTRUM, LAMBDA, ZX80, ZX81, TIMEX, PLUS3, NEXT";
-    echo "(default 10).\n";
+    echo "        -p      output .p instead (set ZX81 mode).\n";
     exit(1);
 }
 
 function Error($msg)
 {
- echo "Error: $msg.\n";
+ echo "Error: ".$msg.PHP_EOL;
  exit(2);
 }
 
 function Warning($msg)
 {
- echo "Warning: $msg.\n";
+ echo "Warning: ".$msg.PHP_EOL;
 }
 
 
@@ -167,9 +192,10 @@ function parseCliOptions($argv, $nextParam, &$parseOptions)
                 case "-O" : $parseOptions->outputFilename = $argv[$nextParam];break;
                 case "-P" : $parseOptions->zx81Mode = true;$parseOptions->outputFormat = "P81";break;
                 case "-R" : $parseOptions->outputTapeMode = false;$parseOptions->outputRawFileMode = true;$parseOptions->outputFormat = "RAW";break;
-                case "-3" : $parseOptions->outputTapeMode = false;$parseOptions->outputPlus3DOSFileMode = true;$parseOptions->outputFormat = "+3";break;
+                case "-3" : $parseOptions->outputTapeMode = false;$parseOptions->outputPlus3DOSFileMode = true;$parseOptions->outputFormat = "DOS";break;
                 case "-S" : $parseOptions->setLabelsModeStartLineNumber = $argv[$nextParam];break;
                 case "-M" : $parseOptions->machineType = $argv[$nextParam];break;
+                case "-Z" : $parseOptions->outputTZX = true;break;
                 default: Error("$currentParam is not a valid option");
             }
         } 
@@ -178,7 +204,8 @@ function parseCliOptions($argv, $nextParam, &$parseOptions)
 }
 
 function parsePostOptions(&$parseOptions)
-{//This file can be called like http://localhost/zmakebas.php?input=input.txt
+{
+    //This file can be called like http://localhost/batoco.php?input=input.txt
     //Other supported parameters are
     // v=on                     : Turns verbose mode on
     // a=<autostartline>        : Sets the line number to auto run the program from
@@ -190,11 +217,13 @@ function parsePostOptions(&$parseOptions)
     // r=on                     : output raw headerless file (default is .tap file).\n";
     // 3=on                     : output a +3DOS compatible file (default is .tap file).\n";
     // s=<StartNumber>          :in labels mode, set starting line number ";
+    // z=on                     : output a TZX file (only support for SPECTRUM or TIMEX)
 
-    //e.g. http://localhost/zmakebas.php?input=input.txt&n=Game&o=Game.tap
+    //e.g. http://localhost/batoco.php?input=input.txt&n=Game&o=Game.tap
 
-    if (is_array($_POST)) {
-        $ok_key_names = ['input', 'v', 'a', 'i', 'l', 'n', 'o', 'p', 'r', '3', 's','m'];
+    if (is_array($_POST)) 
+    {
+        $ok_key_names = ['input', 'v', 'a', 'i', 'l', 'n', 'o', 'p', 'r', '3', 's','m','z'];
         $ok_keys = array_flip(array_filter($ok_key_names, function($arr_key) {
             return array_key_exists($arr_key, $_POST);
         }));
@@ -248,7 +277,7 @@ function parsePostOptions(&$parseOptions)
     if (array_key_exists("3",$a) )
     {
         //$parseOptions->outputTapeMode = false;$parseOptions->outputPlus3DOSFileMode = true;
-        $parseOptions->outputFormat = "+3";
+        $parseOptions->outputFormat = "DOS";
     }
     if (array_key_exists("S",$a) )
     {
@@ -262,11 +291,15 @@ function parsePostOptions(&$parseOptions)
     {
         $parseOptions->machineType = $a['M'];
     }
+    if (array_key_exists("Z",$a) )
+    {
+        $parseOptions->outputTZX = true;
+    }
 
 }
 function parseURLOptions(&$parseOptions)
 {
-    //This file can be called like http://localhost/zx_htm2tap/zmakebas.php?input=inputfile.bas
+    //This file can be called like http://localhost/zx_htm2tap/batoco.php?input=inputfile.bas
     // v=on                     : Turns verbose mode on
     // a=<autostartline>        : Sets the line number to auto run the program from
     // i=<IncrementInterval>"   : In labels mode, set line number incr. (default 2).\n";
@@ -279,10 +312,10 @@ function parseURLOptions(&$parseOptions)
     // s=<StartNumber>          : in labels mode, set starting line number ";
     // input=<Input filename>   : Name of the file to read and convert
 
-    //e.g. http://localhost/zx_htm2tap/zmakebas.php?input=inputfile.bas&v=on&l=on&n=ZMB-TEST&o=outputfile.tap
+    //e.g. http://localhost/zx_htm2tap/batoco.php?input=inputfile.bas&v=on&l=on&n=ZMB-TEST&o=outputfile.tap
     
     if (is_array($_GET)) {
-        $ok_key_names = ['input', 'v', 'a', 'i', 'l', 'n', 'o', 'p', 'r', '3', 's'];
+        $ok_key_names = ['input', 'v', 'a', 'i', 'l', 'n', 'o', 'p', 'r', '3', 's','m','z'];
         $ok_keys = array_flip(array_filter($ok_key_names, function($arr_key) {
             return array_key_exists($arr_key, $_GET);
         }));
@@ -336,7 +369,7 @@ function parseURLOptions(&$parseOptions)
     if (array_key_exists("3",$a) )
     {
         //$parseOptions->outputTapeMode = false;$parseOptions->outputPlus3DOSFileMode = true;
-        $parseOptions->outputFormat = "+3";
+        $parseOptions->outputFormat = "DOS";
     }
     if (array_key_exists("S",$a) )
     {
@@ -350,16 +383,20 @@ function parseURLOptions(&$parseOptions)
     {
         $parseOptions->machineType = $a['M'];
     }
+    if (array_key_exists("Z",$a) )
+    {
+        $parseOptions->outputTZX = true;
+    }
              
 }
 //--------------------------------------------Add File Headers--------------------------------------------------------
-function prependPlus3Header($outputFileName)
+function prependPlus3Header($outputFileName,&$parseOptions)
 {
     $fileSize = filesize($outputFileName) + 128; // Final file size wit header
     $inputHandle = fopen($outputFileName, 'r') or die("Unable to open file!");
     $outputHandle = fopen("prepend.tmp", "w") or die("Unable to open file!");
     $header = array();
-    $header[]= ord('P');
+    $header[]= ord('P'); //+3DOS signature
     $header[]= ord('L');
     $header[]= ord('U');
     $header[]= ord('S');
@@ -450,6 +487,14 @@ function prependSpectrumTapeHeader(&$parseOptions)
     fputs($outputHandle, chr(0x00));
     // Dump header
     for ($i=0;$i<18;$i++) fputs($outputHandle, chr($header[$i]), 1);
+    //If using TZX
+    if($parseOptions->outputTZX)
+    {
+        // Standard Speed Block
+        fputs($outputHandle, chr(0x10)); 
+        fputs($outputHandle, chr(0xE8));  
+        fputs($outputHandle, chr(0x03)); 
+    }  
 
     // write (most of) tap bit for data block
     fputs($outputHandle, chr(($fileSize+2) & 0x00FF));
@@ -504,7 +549,7 @@ function prependZX81TapeHeader(&$parseOptions,$sinclairBasic)
     if($parseOptions->full_D_FILE)
         $D_FILE_SIZE = 0x0318;
     else
-        $D_FLE_SIZE = 0x21;
+        $D_FILE_SIZE = 0x21;
     //Program start address
     $programStartAddress = 0x407D;
     //Skip 	Version
@@ -568,16 +613,18 @@ function prependZX81TapeHeader(&$parseOptions,$sinclairBasic)
     //Now write an empty display buffer
     //Each line of the D_FILE (display file) is 0-32 characters long and ends with a HALT 0x76
     //There are 24 of these lines. A collapsed D_FILE might only ha
+
+    //var_dump($parseOptions->D_FILE);
     for ( $i= 0; $i<24; $i++ )
     {
         //If D_FILE isn't collapsed fill with zeros
         if($parseOptions->full_D_FILE)
         {
             //Check if D_FILE has content
-            if($i<count($parseOptions->D_FILE))
+           if(isset($parseOptions->D_FILE[$i]))
             {
-                //We have content so output it to currentline
-                foreach ( $parseOptions->D_FILE AS $D_BYTE )
+                //We have content so output it to currentline, each line of D_FILE is held as an array of 32 BYTES
+                foreach ( $parseOptions->D_FILE[$i] AS $D_BYTE )
                     fputs($outputHandle,chr($D_BYTE), 1);
             }
             else
@@ -628,7 +675,7 @@ function prependZX80TapeHeader(&$parseOptions,$sinclairBasic)
     if($parseOptions->full_D_FILE)
         $D_FILE_SIZE = 0x0318;
     else
-        $D_FLE_SIZE = 0x21;
+        $D_FILE_SIZE = 0x21;
     //Program start address
     $programStartAddress = 0x4028;
 
@@ -752,27 +799,27 @@ function prependLambdaTapeHeader(&$parseOptions,$sinclairBasic)
     $programStartAddress = 0x4396;
     echo "File size is: ".$fileSize.PHP_EOL;
     //Skip 	Version
-    $header[0] = 0x00; //VERSN - 16393 - 1 Byte - 00h=ZX81, FFh=Lambda
-    $header[1] = 0x7D; //NXTLIN - 16394 - 1 Word
+    $header[0] = 0xFF; //VERSN - 16393 - 1 Byte - 00h=ZX81, FFh=Lambda
+    $header[1] = 0x7D; //D_FILE Address - 16394 - 1 Word
     $header[2] = 0x40; //
     $header[3] = ($programStartAddress & 0x00FF); //PROGRAM - 16396 - 1 Word = 17302
     $header[4] = ($programStartAddress & 0xFF00)>>8;
-    $header[5] = ($programStartAddress & 0x00FF); //DF-CC - 16398 - 1 Word -
-    $header[6] = ($programStartAddress & 0xFF00)>>8; //
+    $header[5] = 0x7D; //DF-CC - Address of print position in display file - 16398 - 1 Word -
+    $header[6] = 0x40; //
     $header[7] = (($programStartAddress + $fileSize+ 1) & 0x00FF); //VARS - 16400 - 1 Word
     $header[8] = (($programStartAddress + $fileSize+ 1) & 0xFF00)>>8;//
     $header[9] = 0x00;//DEST - 16402 - 1 Word
     $header[10] = 0x00;//
-    $header[11] = (($programStartAddress + $fileSize+ 2) & 0x00FF); //E-LINE - 16404 - 1 Word
-    $header[12] = (($programStartAddress + $fileSize+ 2) & 0xFF00)>>8;
-    $header[13] = (($programStartAddress + $fileSize+ 4) & 0x00FF);//CH-ADD - 16406 - 1 Word
-    $header[14] = (($programStartAddress + $fileSize+ 4) & 0xFF00)>>8; //
-    //X-PTR - 16408 - 1 Word
-    //
-    $header[17] = (($programStartAddress + $fileSize+ 4) & 0x00FF);//STKBOT - 16410 - 1 Word
-    $header[18] = (($programStartAddress + $fileSize+ 4) & 0xFF00)>>8; //
-    $header[19] = (($programStartAddress + $fileSize+ 4) & 0x00FF);//STKEND - 16412 - 1 Word
-    $header[20] = (($programStartAddress + $fileSize+ 4) & 0xFF00)>>8;//
+    $header[11] = (($programStartAddress + $fileSize+ 1) & 0x00FF); //E-LINE - 16404 - 1 Word
+    $header[12] = (($programStartAddress + $fileSize+ 1) & 0xFF00)>>8;
+    $header[13] = (($programStartAddress + $fileSize+ 1) & 0x00FF);//CH-ADD - 16406 - 1 Word
+    $header[14] = (($programStartAddress + $fileSize+ 1) & 0xFF00)>>8; //
+    $header[15] = 0x3B;//X-PTR - 16408 - 1 Word
+    $header[16] = 0x40; //
+    $header[17] = (($programStartAddress + $fileSize+ 1) & 0x00FF);//STKBOT - 16410 - 1 Word
+    $header[18] = (($programStartAddress + $fileSize+ 1) & 0xFF00)>>8; //
+    $header[19] = (($programStartAddress + $fileSize+ 1) & 0x00FF);//STKEND - 16412 - 1 Word
+    $header[20] = (($programStartAddress + $fileSize+ 1) & 0xFF00)>>8;//
     $header[21] = 0x80;//BERG - 16414 - Byte
     $header[22] = 0x5D;//MEM - 16415 - 1 Word
     $header[23] = 0x40;//
@@ -782,10 +829,13 @@ function prependLambdaTapeHeader(&$parseOptions,$sinclairBasic)
     //
     $header[28] = 0xFF; //LAST_K - 16421 - 1 Word
     $header[29] = 0xFF; //
-    $header[30] = 0x00; //BOUNCE - 16423 - 1 Byte
+    $header[30] = 0x0F; //BOUNCE - 16423 - 1 Byte
     $header[31] = 0x1F; //MARGIN - 16424 - 1 Byte - Number of scanlines before start of display (55=PAL, 31=NTSC)
-    $header[32] = ($parseOptions->firstLineNum & 0x00FF); //E_PPC - 16425 - 1 Word - Line number of line which has the edit cursor
-    $header[33] = ($parseOptions->firstLineNum & 0xFF00)>>8;// E_PPC  high
+    //$header[32] = ($parseOptions->firstLineNum & 0x00FF); //E_PPC - 16425 - 1 Word - Line number of line which has the edit cursor
+    //$header[33] = ($parseOptions->firstLineNum & 0xFF00)>>8;// E_PPC  high
+    
+    $header[32] = 0x1E; //E_PPC - 16425 - 1 Word - Line number of line which has the edit cursor
+    $header[33] = 0x00;// E_PPC  high
 
     //Skip OLDPPC - 16427 - 1 Word - CONT
     //Skip FLAG X - 16429 - 1 Byte
@@ -801,8 +851,8 @@ function prependLambdaTapeHeader(&$parseOptions,$sinclairBasic)
     //
     $header[47] = 0x3C; //PR CC - 16440 - 1 Byte
     $header[48] = 0x21; //S_POSN - 16441 - 1 Word
-    $header[49] = 0x0; //
-    $header[50] = 0xC0;//CDFLAG - 16443 - 1 Byte (additional bit4=graphics_cursor, bit5=beep_disable)
+    $header[49] = 0x18; //
+    $header[50] = 0x40;//CDFLAG - 16443 - 1 Byte (additional bit4=graphics_cursor, bit5=beep_disable)
     //PrintBuffer 33 Bytes
     $header[83] = 0x76; //End of printbuffer
     //MEMBOT - 16477 - 30 Bytes
@@ -818,10 +868,17 @@ function prependLambdaTapeHeader(&$parseOptions,$sinclairBasic)
     //Now write an empty display buffer
     //Each line of the D_FILE (display file) is 0-32 characters long and ends with a HALT 0x76
     //There are 24 of these lines. A collapsed D_FILE might only ha
+    var_dump($parseOptions->D_FILE);
     for ( $i= 0; $i<24; $i++ )
     {
-        //If D_FILE isn't collapsed fill with zeros
-        if($parseOptions->full_D_FILE)
+        //Check if D_FILE has content
+        if(isset($parseOptions->D_FILE[$i]))
+        {
+            //We have content so output it to currentline, each line of D_FILE is held as an array of 32 BYTES
+            foreach ( $parseOptions->D_FILE[$i] AS $D_BYTE )
+                fputs($outputHandle,chr($D_BYTE), 1);
+        }
+        else
         {
             for ($j= 0; $j< 32; $j++)
                 fputs($outputHandle,chr(0x00), 1);
@@ -848,6 +905,61 @@ function prependLambdaTapeHeader(&$parseOptions,$sinclairBasic)
     rename("prepend.tmp" ,$parseOptions->outputFilename);
     echo "Done." . PHP_EOL;
 }
+
+function prependTZXHeader(&$parseOptions)
+{
+    $fileSize = filesize($parseOptions->outputFilename); // Final file size
+    $header = array();
+    //Intro Block
+    $header[]= ord('Z');
+    $header[]= ord('X');
+    $header[]= ord('T');
+    $header[]= ord('a');
+    $header[]= ord('p');
+    $header[]= ord('e');
+    $header[]= ord('!');
+    $header[]= 0x1A; // Soft EOF
+    $header[]= 0x01; // Issue
+    $header[]= 0x0D; // Version
+    // Start Text block
+    $header[]= 0x30; 
+    $header[]= 0x11;//Length of text block - Alter this to match the section below
+    $header[]= ord('C');
+    $header[]= ord('R');
+    $header[]= ord('E');
+    $header[]= ord('A');
+    $header[]= ord('T');
+    $header[]= ord('E');
+    $header[]= ord('D');
+    $header[]= ord(' ');
+    $header[]= ord('B');
+    $header[]= ord('Y');
+    $header[]= ord(' ');
+    $header[]= ord('B');
+    $header[]= ord('A');
+    $header[]= ord('T');
+    $header[]= ord('O');
+    $header[]= ord('C');
+    $header[]= ord('O');
+    // Standard Speed Block
+    $header[]= 0x10;  
+    $header[]= 0xE8;   //Pause after this block in milliseconds  
+    $header[]= 0x03;        
+    //$header[]= $fileSize & 0x00FF;  // Two bytes for data size
+    //$header[]= ($fileSize & 0xFF00) >> 8;
+    
+    $outputHandle = fopen("prepend.tmp", "w") or die("Unable to open file!");
+    // Dump header
+    for ($i=0;$i<sizeof($header);$i++) fputs($outputHandle, chr($header[$i]), 1);
+
+    fwrite($outputHandle,file_get_contents($parseOptions->outputFilename));
+    fclose($outputHandle);
+    unlink($parseOptions->outputFilename);
+    //pause to allow temp file to be unlocked
+    echo "Pausing to allow time for the temp file to unlock." . PHP_EOL;
+    sleep(1);
+    rename("prepend.tmp" ,$parseOptions->outputFilename);
+}
 //--------------------------------------------End Add File Headers-----------------------------------------------------
 
 //-------------------------------------------------Init Functions------------------------------------------------------
@@ -860,18 +972,31 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
             initSpectrumArrays($keywordArray, $characterArray);
             $parseOptions->caseSensitive = true;
             $parseOptions->lineEnding = 0x0D;
+            if($parseOptions->outputTZX)
+            {
+                $tempFilename = pathinfo($parseOptions->outputFilename);
+                $parseOptions->outputFilename = $tempFilename['filename'].'.'."tzx";
+            }
             break;
         
         case "PLUS3" :
             initSpectrumArrays($keywordArray, $characterArray);
             $parseOptions->caseSensitive = true;
             $parseOptions->lineEnding = 0x0D;
+            if($parseOptions->outputFilename == DEFAULT_OUTPUT)
+                $parseOptions->outputFilename = "Output";
+            $parseOptions->outputFormat = "DOS";
             break;
         
         case "TIMEX" :
             initTimexArrays($keywordArray, $characterArray);
             $parseOptions->caseSensitive = true;
             $parseOptions->lineEnding = 0x0D;
+            if($parseOptions->outputTZX)
+            {
+                $tempFilename = pathinfo($parseOptions->outputFilename);
+                $parseOptions->outputFilename = $tempFilename['filename'].'.'."tzx";
+            }
             break;
         
         case "LAMBDA" :
@@ -906,12 +1031,69 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
             $parseOptions->caseSensitive = true;
             $parseOptions->lineEnding = 0x0D;
             if($parseOptions->outputFilename == DEFAULT_OUTPUT)
-                $parseOptions->outputFilename = DEFAULT_OUTPUT_81;
+                $parseOptions->outputFilename = "Output";
+            $parseOptions->outputFormat = "DOS";
             break;
 
         default :
             Error("Invalid machine type specified: Valid machines are SPECTRUM, LAMBDA, ZX80, ZX81, TIMEX, PLUS3, NEXT");
         }
+}
+
+function checkOutputFile(&$parseOptions)
+{
+    $Extension = strrpos($parseOptions->outputFilename,"."); 
+    if($Extension===false)
+    {
+        Warning("Output file name ".$parseOptions->outputFilename." has no extension. Suitable extension being added.");
+        switch ($parseOptions->machineType)
+        {
+            case "SPECTRUM" :
+            case "TIMEX" :
+                $parseOptions->outputFilename=$parseOptions->outputFilename.".TAP";
+                break;
+            case "PLUS3" :
+            case "NEXT" :
+                break;
+            case "ZX81" :
+            case "LAMBDA" :
+                $parseOptions->outputFilename=$parseOptions->outputFilename.".P";
+                break;
+            case "ZX80" :
+                $parseOptions->outputFilename=$parseOptions->outputFilename.".O";
+                break;
+            default:
+                Warning("Machine type unknown adding TAP extension");
+                $parseOptions->outputFilename=$parseOptions->outputFilename.".TAP";
+                break;
+        }
+    }
+    else
+    {
+        $Extension = strtoupper(substr($parseOptions->outputFilename,$Extension+1));
+        switch (strtoupper($Extension))
+        {
+            case "TAP":
+                if(($parseOptions->machineType !== "SPECTRUM") and ($parseOptions->machineType !== "TIMEX") and ($parseOptions->machineType !== "PLUS3") and ($parseOptions->machineType !== "NEXT"))
+                    Warning("Unusal file extension ".$Extension." given for machine type ".$parseOptions->machineType.". Trusting you know best.");
+                break;
+            case "TZX":
+                if($parseOptions->machineType !== "SPECTRUM" and $parseOptions->machineType !== "TIMEX")
+                    Warning("Unusal file extension ".$Extension." given for machine type ".$parseOptions->machineType.". Trusting you know best.");
+                break;
+            case "P":
+                if($parseOptions->machineType !== "LAMBDA" and $parseOptions->machineType !== "ZX81")
+                    Warning("Unusal file extension ".$Extension." given for machine type ".$parseOptions->machineType.". Trusting you know best.");
+                break;
+            case "O":
+                if($parseOptions->machineType !== "ZX80")
+                    Warning("Unusal file extension ".$Extension." given for machine type ".$parseOptions->machineType.". Trusting you know best.");
+                break;
+            default:
+                Warning("Unusal file extension ".$Extension." given for machine type ".$parseOptions->machineType.". Trusting you know best.");
+                break;
+        }
+    }
 }
 
 function initSpectrumArrays(&$keywordArray, &$characterArray)
@@ -1166,7 +1348,7 @@ function initSpectrumArrays(&$keywordArray, &$characterArray)
             "(t)"=>163,
             "(u)"=>164,
             "<="=>199,
-            "=>"=>200,
+            ">="=>200,
             "<>"=>201);
 
 }
@@ -1188,21 +1370,21 @@ function initLambdaArrays(&$keywordArray, &$characterArray)
     $characterArray = array(
         "BLANKBLANK"=>0,
         " "=>0,
-        "' "=>1,
+        "'BLANK"=>1,
         "BLANK'"=>2,
         "''"=>3,
-        ". "=>4,
-        ": "=>5,
+        ".BLANK"=>4,
+        ":BLANK"=>5,
         ".'"=>6,
         ":'"=>7,
-        "!!"=>8,
-        "!*"=>9,
-        "*!"=>10,
+        "!:"=>8, //Car
+        ":>"=>9, //Triangle top left
+        "<:"=>10, //Triangle bottom right
         "\""=>11,
-        "!>"=>12,
+        "]["=>12, //Spider
         "$"=>13,
-        "!("=>14,
-        "!<"=>15,
+        ")("=>14, //Butterfly
+        "##"=>15, //Ghost
         "("=>16,
         ")"=>17,
         ">"=>18,
@@ -1291,6 +1473,7 @@ function initLambdaArrays(&$keywordArray, &$characterArray)
         "NUMBER"=>126,
         "CURSOR"=>127,
         "::"=>128,
+        "% "=>128,
         ".:"=>129,
         ":."=>130,
         ".."=>131,
@@ -1298,62 +1481,88 @@ function initLambdaArrays(&$keywordArray, &$characterArray)
         "BLANK:"=>133,
         "'."=>134,
         "BLANK."=>135,
-        "¦¦"=>136,
-        "¦*"=>137,
-        "*¦"=>138,
-        "#\""=>139,
-        "¦>"=>140,
+        ":!"=>136, //Car inverse
+        ">:"=>137, //Triangle bottom right
+        ":<"=>138, //Triangle bottom left
+        "%\""=>139,
+        "[]"=>140, //Spider inverse
         "#$"=>141,
-        "¦("=>142,
-        "¦<"=>143,
-        "#("=>144,
-        "#)"=>145,
-        "#>"=>146,
-        "#<"=>147,
-        "#="=>148,
-        "#+"=>149,
-        "#-"=>150,
-        "#*"=>151,
-        "#/"=>152,
-        "#;"=>153,
-        "#,"=>154,
-        "#."=>155,
-        "#0"=>156,
-        "#1"=>157,
-        "#2"=>158,
-        "#3"=>159,
-        "#4"=>160,
-        "#5"=>161,
-        "#6"=>162,
-        "#7"=>163,
-        "#8"=>164,
-        "#9"=>165,
-        "#A"=>166,
-        "#B"=>167,
-        "#C"=>168,
-        "#D"=>169,
-        "#E"=>170,
-        "#F"=>171,
-        "#G"=>172,
-        "#H"=>173,
-        "#I"=>174,
-        "#J"=>175,
-        "#K"=>176,
-        "#L"=>177,
-        "#M"=>178,
-        "#N"=>179,
-        "#O"=>180,
-        "#P"=>181,
-        "#Q"=>182,
-        "#R"=>183,
-        "#S"=>184,
-        "#T"=>185,
-        "#U"=>186,
-        "#V"=>187,
-        "#W"=>188,
-        "#X"=>189,
-        "#Y"=>190,
-        "#Z"=>191,
+        "()"=>142, //Butterfly inverse
+        "@@"=>143, //Ghost inverse
+        "%("=>144,
+        "%)"=>145,
+        "%>"=>146,
+        "%<"=>147,
+        "%="=>148,
+        "%+"=>149,
+        "%-"=>150,
+        "%*"=>151,
+        "%/"=>152,
+        "%;"=>153,
+        "%,"=>154,
+        "%."=>155,
+        "%0"=>156,
+        "%1"=>157,
+        "%2"=>158,
+        "%3"=>159,
+        "%4"=>160,
+        "%5"=>161,
+        "%6"=>162,
+        "%7"=>163,
+        "%8"=>164,
+        "%9"=>165,
+        "%A"=>166,
+        "%a"=>166,
+        "%B"=>167,
+        "%b"=>167,
+        "%C"=>168,
+        "%c"=>168,
+        "%D"=>169,
+        "%d"=>169,
+        "%E"=>170,
+        "%e"=>170,
+        "%F"=>171,
+        "%f"=>171,
+        "%G"=>172,
+        "%g"=>172,
+        "%H"=>173,
+        "%h"=>173,
+        "%I"=>174,
+        "%i"=>174,
+        "%J"=>175,
+        "%j"=>175,
+        "%K"=>176,
+        "%k"=>176,
+        "%L"=>177,
+        "%l"=>177,
+        "%M"=>178,
+        "%m"=>178,
+        "%N"=>179,
+        "%n"=>179,
+        "%O"=>180,
+        "%o"=>180,
+        "%P"=>181,
+        "%p"=>181,
+        "%Q"=>182,
+        "%q"=>182,
+        "%R"=>183,
+        "%r"=>183,
+        "%S"=>184,
+        "%s"=>184,
+        "%T"=>185,
+        "%t"=>185,
+        "%U"=>186,
+        "%u"=>186,
+        "%V"=>187,
+        "%v"=>187,
+        "%W"=>188,
+        "%w"=>188,
+        "%X"=>189,
+        "%x"=>189,
+        "%Y"=>190,
+        "%y"=>190,
+        "%Z"=>191,
+        "%z"=>191,
         "**"=>214,
         "<="=>217,
         ">="=>218,
@@ -1440,16 +1649,16 @@ function initZX81Arrays(&$keywordArray, &$characterArray)
     $characterArray = array(
         "BLANKBLANK"=>0,
         " "=>0,
-        "' "=>1,
+        "'BLANK"=>1,
         "BLANK'"=>2,
         "''"=>3,
-        ". "=>4,
-        ": "=>5,
+        ".BLANK"=>4,
+        ":BLANK"=>5,
         ".'"=>6,
         ":'"=>7,
-        "!:"=>8,
-        "!."=>9,
-        "!'"=>10,
+        "##"=>8, //Pixel block
+        "~~"=>9, //Pixel top block
+        ",,"=>10, //Pixel bottom block
         "\""=>11,
         "£"=>12,
         "$"=>13,
@@ -1542,6 +1751,7 @@ function initZX81Arrays(&$keywordArray, &$characterArray)
         "NUMBER"=>126,
         "CURSOR"=>127,
         "::"=>128,
+        "% "=>128,
         ".:"=>129,
         ":."=>130,
         ".."=>131,
@@ -1549,62 +1759,88 @@ function initZX81Arrays(&$keywordArray, &$characterArray)
         "BLANK:"=>133,
         "'."=>134,
         "BLANK."=>135,
-        "¦:"=>136,
-        "¦."=>137,
-        "¦'"=>138,
-        "#\""=>139,
-        "#£"=>140,
-        "#$"=>141,
-        "#:"=>142,
-        "#?"=>143,
-        "#("=>144,
-        "#)"=>145,
-        "#>"=>146,
-        "#<"=>147,
-        "#="=>148,
-        "#+"=>149,
-        "#-"=>150,
-        "#*"=>151,
-        "#/"=>152,
-        "#;"=>153,
-        "#,"=>154,
-        "#."=>155,
-        "#0"=>156,
-        "#1"=>157,
-        "#2"=>158,
-        "#3"=>159,
-        "#4"=>160,
-        "#5"=>161,
-        "#6"=>162,
-        "#7"=>163,
-        "#8"=>164,
-        "#9"=>165,
-        "#A"=>166,
-        "#B"=>167,
-        "#C"=>168,
-        "#D"=>169,
-        "#E"=>170,
-        "#F"=>171,
-        "#G"=>172,
-        "#H"=>173,
-        "#I"=>174,
-        "#J"=>175,
-        "#K"=>176,
-        "#L"=>177,
-        "#M"=>178,
-        "#N"=>179,
-        "#O"=>180,
-        "#P"=>181,
-        "#Q"=>182,
-        "#R"=>183,
-        "#S"=>184,
-        "#T"=>185,
-        "#U"=>186,
-        "#V"=>187,
-        "#W"=>188,
-        "#X"=>189,
-        "#Y"=>190,
-        "#Z"=>191,
+        "@@"=>136, //Inverse pixel block
+        "!!"=>137, //Inverse pixel top
+        "::"=>138, //Inverse pixel bottom
+        "%\""=>139,
+        "%£"=>140,
+        "%$"=>141,
+        "%:"=>142,
+        "%?"=>143,
+        "%("=>144,
+        "%)"=>145,
+        "%>"=>146,
+        "%<"=>147,
+        "%="=>148,
+        "%+"=>149,
+        "%-"=>150,
+        "%*"=>151,
+        "%/"=>152,
+        "%;"=>153,
+        "%,"=>154,
+        "%."=>155,
+        "%0"=>156,
+        "%1"=>157,
+        "%2"=>158,
+        "%3"=>159,
+        "%4"=>160,
+        "%5"=>161,
+        "%6"=>162,
+        "%7"=>163,
+        "%8"=>164,
+        "%9"=>165,
+        "%A"=>166,
+        "%a"=>166,
+        "%B"=>167,
+        "%b"=>167,
+        "%C"=>168,
+        "%c"=>168,
+        "%D"=>169,
+        "%d"=>169,
+        "%E"=>170,
+        "%e"=>170,
+        "%F"=>171,
+        "%f"=>171,
+        "%G"=>172,
+        "%g"=>172,
+        "%H"=>173,
+        "%h"=>173,
+        "%I"=>174,
+        "%i"=>174,
+        "%J"=>175,
+        "%j"=>175,
+        "%K"=>176,
+        "%k"=>176,
+        "%L"=>177,
+        "%l"=>177,
+        "%M"=>178,
+        "%m"=>178,
+        "%N"=>179,
+        "%n"=>179,
+        "%O"=>180,
+        "%o"=>180,
+        "%P"=>181,
+        "%p"=>181,
+        "%Q"=>182,
+        "%q"=>182,
+        "%R"=>183,
+        "%r"=>183,
+        "%S"=>184,
+        "%s"=>184,
+        "%T"=>185,
+        "%t"=>185,
+        "%U"=>186,
+        "%u"=>186,
+        "%V"=>187,
+        "%v"=>187,
+        "%W"=>188,
+        "%w"=>188,
+        "%X"=>189,
+        "%x"=>189,
+        "%Y"=>190,
+        "%y"=>190,
+        "%Z"=>191,
+        "%z"=>191,
         "“”"=>192,
         "**"=>216,
         "<="=>219,
@@ -1687,14 +1923,14 @@ function initZX80Arrays(&$keywordArray, &$characterArray)
         "\""=>1,
         "BLANK:"=>2,
         ".."=>3,
-        "' "=>4,
+        "'BLANK"=>4,
         "BLANK'"=>5,
-        ". "=>6,
+        ".BLANK"=>6,
         "BLANK."=>7,
         ".'"=>8,
-        "!:"=>9,
-        "!."=>10,
-        "!'"=>11,
+        "##"=>9, //Pixel Block
+        "~~"=>10, //Pixel Top
+        ",,"=>11, //Pixel Bottom
         "£"=>12,
         "$"=>13,
         ":"=>14,
@@ -1783,8 +2019,8 @@ function initZX80Arrays(&$keywordArray, &$characterArray)
         "RUBOUT"=>119,
         "NUMBER"=>126,
         "CURSOR"=>127,
-        "BLANK:"=>128,
-        "#\""=>129,
+        "% "=>128,
+        "%\""=>129,
         "BLANK:"=>130,
         "''"=>131,
         ".:"=>132,
@@ -1792,61 +2028,87 @@ function initZX80Arrays(&$keywordArray, &$characterArray)
         "':"=>134,
         ":'"=>135,
         "'."=>136,
-        "¦:"=>137,
-        "¦."=>138,
-        "¦'"=>139,
-        "#£"=>140,
-        "#$"=>141,
-        "#:"=>142,
-        "#?"=>143,
-        "#("=>144,
-        "#)"=>145,
-        "#-"=>146,
-        "#+"=>147,
-        "#*"=>148,
-        "#/"=>149,
-        "#="=>150,
-        "#>"=>151,
-        "#<"=>152,
-        "#;"=>153,
-        "#,"=>154,
-        "#."=>155,
-        "#0"=>156,
-        "#1"=>157,
-        "#2"=>158,
-        "#3"=>159,
-        "#4"=>160,
-        "#5"=>161,
-        "#6"=>162,
-        "#7"=>163,
-        "#8"=>164,
-        "#9"=>165,
-        "#A"=>166,
-        "#B"=>167,
-        "#C"=>168,
-        "#D"=>169,
-        "#E"=>170,
-        "#F"=>171,
-        "#G"=>172,
-        "#H"=>173,
-        "#I"=>174,
-        "#J"=>175,
-        "#K"=>176,
-        "#L"=>177,
-        "#M"=>178,
-        "#N"=>179,
-        "#O"=>180,
-        "#P"=>181,
-        "#Q"=>182,
-        "#R"=>183,
-        "#S"=>184,
-        "#T"=>185,
-        "#U"=>186,
-        "#V"=>187,
-        "#W"=>188,
-        "#X"=>189,
-        "#Y"=>190,
-        "#Z"=>191,
+        "@@"=>137, //Inverse pixel block
+        "!!"=>138, //Inverse pixel top
+        "::"=>139, //Inverse pixel bottom
+        "%£"=>140,
+        "%$"=>141,
+        "%:"=>142,
+        "%?"=>143,
+        "%("=>144,
+        "%)"=>145,
+        "%-"=>146,
+        "%+"=>147,
+        "%*"=>148,
+        "%/"=>149,
+        "%="=>150,
+        "%>"=>151,
+        "%<"=>152,
+        "%;"=>153,
+        "%,"=>154,
+        "%."=>155,
+        "%0"=>156,
+        "%1"=>157,
+        "%2"=>158,
+        "%3"=>159,
+        "%4"=>160,
+        "%5"=>161,
+        "%6"=>162,
+        "%7"=>163,
+        "%8"=>164,
+        "%9"=>165,
+        "%A"=>166,
+        "%a"=>166,
+        "%B"=>167,
+        "%b"=>167,
+        "%C"=>168,
+        "%c"=>168,
+        "%D"=>169,
+        "%d"=>169,
+        "%E"=>170,
+        "%e"=>170,
+        "%F"=>171,
+        "%f"=>171,
+        "%G"=>172,
+        "%g"=>172,
+        "%H"=>173,
+        "%h"=>173,
+        "%I"=>174,
+        "%i"=>174,
+        "%J"=>175,
+        "%j"=>175,
+        "%K"=>176,
+        "%k"=>176,
+        "%L"=>177,
+        "%l"=>177,
+        "%M"=>178,
+        "%m"=>178,
+        "%N"=>179,
+        "%n"=>179,
+        "%O"=>180,
+        "%o"=>180,
+        "%P"=>181,
+        "%p"=>181,
+        "%Q"=>182,
+        "%q"=>182,
+        "%R"=>183,
+        "%r"=>183,
+        "%S"=>184,
+        "%s"=>184,
+        "%T"=>185,
+        "%t"=>185,
+        "%U"=>186,
+        "%u"=>186,
+        "%V"=>187,
+        "%v"=>187,
+        "%W"=>188,
+        "%w"=>188,
+        "%X"=>189,
+        "%x"=>189,
+        "%Y"=>190,
+        "%y"=>190,
+        "%Z"=>191,
+        "%z"=>191,
         "“”"=>212,
         ";"=>215,
         "'"=>216,
@@ -1874,6 +2136,7 @@ function initZX80Arrays(&$keywordArray, &$characterArray)
         "SAVE"=>234,
         "FOR"=>235,
         "GOTO"=>236,
+        "GO TO"=>236,
         "POKE"=>237,
         "INPUT"=>238,
         "RANDOMISE"=>239,
@@ -1895,7 +2158,285 @@ function initZX80Arrays(&$keywordArray, &$characterArray)
 
 function initNextArrays(&$keywordArray, &$characterArray)
 {
+    $keywordArray = array(
+    
+        "DPEEK"=>138,
+        "MOD"=>139,
+        "UNTIL"=>142,
+        "ERROR"=>143,
+        "ON"=>144,
+        "DEFPROC"=>145,
+        "ENDPROC"=>146,
+        "PROC"=>147,
+        "LOCAL"=>148,
+        "DRIVER"=>149,
+        "WHILE"=>150,
+        "REPEAT"=>151,
+        "ELSE"=>152,
+        "REMOUNT"=>153,
+        "BANK"=>154,
+        "TILE"=>155,
+        "LAYER"=>156,
+        "PALETTE"=>157,
+        "SPRITE"=>158,
+        "PWD"=>159,
+        "CD"=>160,
+        "MKDIR"=>161,
+        "RMDIR"=>162,
+        "SPECTRUM"=>163,
+        "PLAY"=>164,
+        "RND"=>165,
+        "INKEY$"=>166,
+        "PI"=>167,
+        "FN"=>168,
+        "POINT"=>169,
+        "SCREEN$"=>170,
+        "ATTR"=>171,
+        "AT"=>172,
+        "TAB"=>173,
+        "VAL$"=>174,
+        "CODE"=>175,
+        "VAL"=>176,
+        "LEN"=>177,
+        "SIN"=>178,
+        "COS"=>179,
+        "TAN"=>180,
+        "ASN"=>181,
+        "ACS"=>182,
+        "ATN"=>183,
+        "LN"=>184,
+        "EXP"=>185,
+        "INT"=>186,
+        "SQR"=>187,
+        "SGN"=>188,
+        "ABS"=>189,
+        "PEEK"=>190,
+        "IN"=>191,
+        "USR"=>192,
+        "STR$"=>193,
+        "CHR$"=>194,
+        "NOT"=>195,
+        "BIN"=>196,
+        "OR"=>197,
+        "AND"=>198,
+        "LINE"=>202,
+        "THEN"=>203,
+        "TO"=>204,
+        "STEP"=>205,
+        "DEF FN"=>206,
+        "CAT"=>207,
+        "FORMAT"=>208,
+        "MOVE"=>209,
+        "ERASE"=>210,
+        "OPEN #"=>211,
+        "CLOSE #"=>212,
+        "MERGE"=>213,
+        "VERIFY"=>214,
+        "BEEP"=>215,
+        "CIRCLE"=>216,
+        "INK"=>217,
+        "PAPER"=>218,
+        "FLASH"=>219,
+        "BRIGHT"=>220,
+        "INVERSE"=>221,
+        "OVER"=>222,
+        "OUT"=>223,
+        "LPRINT"=>224,
+        "LLIST"=>225,
+        "STOP"=>226,
+        "READ"=>227,
+        "DATA"=>228,
+        "RESTORE"=>229,
+        "NEW"=>230,
+        "BORDER"=>231,
+        "CONTINUE"=>232,
+        "DIM"=>233,
+        "REM"=>234,
+        "FOR"=>235,
+        "GO TO"=>236,
+        "GOTO"=>236,
+        "GO SUB"=>237,
+        "GOSUB"=>237,
+        "INPUT"=>238,
+        "LOAD"=>239,
+        "LIST"=>240,
+        "LET"=>241,
+        "PAUSE"=>242,
+        "NEXT"=>243,
+        "POKE"=>244,
+        "PRINT"=>245,
+        "PLOT"=>246,
+        "RUN"=>247,
+        "SAVE"=>248,
+        "RANDOMIZE"=>249,
+        "RANDOMISE"=>249,
+        "IF"=>250,
+        "CLS"=>251,
+        "DRAW"=>252,
+        "CLEAR"=>253,
+        "RETURN"=>254,
+        "COPY"=>255
+        );
 
+        $characterArray = array(
+            "PRINT comma"=>6,
+            "Edit"=>7,
+            "Backspace"=>12,
+            "Enter"=>13,
+            "number"=>14,
+            "Not used"=>15,
+            "INK control"=>16,
+            "PAPER control"=>17,
+            "FLASH control"=>18,
+            "BRIGHT control"=>19,
+            "INVERSE control"=>20,
+            "OVER control"=>21,
+            "AT control"=>22,
+            "TAB control"=>23,
+            "SPACE"=>32,
+            " "=>32,
+            "!"=>33,
+            "\""=>34,
+            "#"=>35,
+            "$"=>36,
+            "%"=>37,
+            "&"=>38,
+            "'"=>39,
+            "("=>40,
+            ")"=>41,
+            "*"=>42,
+            "+"=>43,
+            ","=>44,
+            "-"=>45,
+            "."=>46,
+            "/"=>47,
+            "0"=>48,
+            "1"=>49,
+            "2"=>50,
+            "3"=>51,
+            "4"=>52,
+            "5"=>53,
+            "6"=>54,
+            "7"=>55,
+            "8"=>56,
+            "9"=>57,
+            ":"=>58,
+            ";"=>59,
+            "<"=>60,
+            "="=>61,
+            ">"=>62,
+            "?"=>63,
+            "@"=>64,
+            "A"=>65,
+            "B"=>66,
+            "C"=>67,
+            "D"=>68,
+            "E"=>69,
+            "F"=>70,
+            "G"=>71,
+            "H"=>72,
+            "I"=>73,
+            "J"=>74,
+            "K"=>75,
+            "L"=>76,
+            "M"=>77,
+            "N"=>78,
+            "O"=>79,
+            "P"=>80,
+            "Q"=>81,
+            "R"=>82,
+            "S"=>83,
+            "T"=>84,
+            "U"=>85,
+            "V"=>86,
+            "W"=>87,
+            "X"=>88,
+            "Y"=>89,
+            "Z"=>90,
+            "["=>91,
+            "¡"=>91,
+            "\\"=>92,
+            "Ñ"=>92,
+            "]"=>93,
+            "¿"=>93,
+            "^"=>94,
+            "_"=>95,
+            "£"=>96,
+            "€"=>96,
+            "a"=>97,
+            "b"=>98,
+            "c"=>99,
+            "d"=>100,
+            "e"=>101,
+            "f"=>102,
+            "g"=>103,
+            "h"=>104,
+            "i"=>105,
+            "j"=>106,
+            "k"=>107,
+            "l"=>108,
+            "m"=>109,
+            "n"=>110,
+            "o"=>111,
+            "p"=>112,
+            "q"=>113,
+            "r"=>114,
+            "s"=>115,
+            "t"=>116,
+            "u"=>117,
+            "v"=>118,
+            "w"=>119,
+            "x"=>120,
+            "y"=>121,
+            "z"=>122,
+            "{"=>123,
+            "|"=>124,
+            "ñ"=>124,
+            "}"=>125,
+            "~"=>126,
+            "©"=>127,
+            "BLANKBLANK"=>128,
+            "BLANK'"=>129,
+            "'BLANK"=>130,
+            "''"=>131,
+            "BLANK."=>132,
+            "BLANK:"=>133,
+            "'."=>134,
+            "':"=>135,
+            ".BLANK"=>136,
+            ".'"=>137,
+            ":BLANK"=>138,
+            ":'"=>139,
+            ".."=>140,
+            ".:"=>141,
+            ":."=>142,
+            "::"=>143,
+            "(a)"=>144,
+            "(b)"=>145,
+            "(c)"=>146,
+            "(d)"=>147,
+            "(e)"=>148,
+            "(f)"=>149,
+            "(g)"=>150,
+            "(h)"=>151,
+            "(i)"=>152,
+            "(j)"=>153,
+            "(k)"=>154,
+            "(l)"=>155,
+            "(m)"=>156,
+            "(n)"=>157,
+            "(o)"=>158,
+            "(p)"=>159,
+            "(q)"=>160,
+            "(r)"=>161,
+            "(s)"=>162,
+            "(t)"=>163,
+            "(u)"=>164,
+            "<="=>199,
+            "=>"=>200,
+            "<>"=>201,
+            "<<"=>140,
+            ">>"=>141);
 }
 //-------------------------------------------------End Init Functions--------------------------------------------------
 //-------------------------------------------------MAIN----------------------------------------------------------------
@@ -1909,9 +2450,11 @@ $parseOptions->verboseMode = false;
 $parseOptions->autostartLine = 0x8000;
 $parseOptions->spectrumFilename = "out.tap";
 $parseOptions->outputFilename = DEFAULT_OUTPUT;
+$parseOptions->outputFileExtension = DEFAULT_EXTENSION;
 $parseOptions->zx81Mode = false;
 $parseOptions->outputTapeMode = true;
 $parseOptions->outputRawFileMode = false;
+$parseOptions->outputTZX = false;
 $parseOptions->outputPlus3DOSFileMode = false;
 $parseOptions->useLabels = false;
 $parseOptions->setLabelModeIncrement = 2;
@@ -1945,6 +2488,7 @@ else
 $sinclairBasicKeywords = array();
 $sinclairBasic = array();
 initArrays($sinclairBasicKeywords, $sinclairBasic, $parseOptions);
+checkOutputFile($parseOptions);
 
 if($parseOptions->verboseMode)echo "Machine Type = ".$parseOptions->machineType.PHP_EOL;
 
@@ -1955,9 +2499,9 @@ if($parseOptions->useLabels && ($parseOptions->setLabelModeIncrement < 1) || ($p
     Error("Label line incr. must be in the range 1 to 1000.");
 }
 
-if((!$parseOptions->autostartLine == 0x8000) && (($parseOptions->autostartLine < 0) || ($parseOptions->autostartLine > 1000)))
+if((!$parseOptions->autostartLine == 0x8000) && (($parseOptions->autostartLine < 0) || ($parseOptions->autostartLine > 9999)))
 {
-    Error("Autostart line number must be in the range 1 to 1000.");
+    Error("Autostart line number must be in the range 1 to 9999.");
 }
 
 // Check input file exists
@@ -2016,7 +2560,7 @@ foreach ($basicLines as $CurrentLine)
     //If last character of the line equals \\ then append next line to this one and delete next line
     if($CurrentLine[strlen($CurrentLine)-1] == '\\')
     {
-        $basicLines[$currentLineNum] = $basicLines[$currentLineNum] . ltrim($basicLines[$currentLineNum+1]);
+        $basicLines[$currentLineNum] = rtrim($basicLines[$currentLineNum]," \n\r\t\v\x00\\") . ltrim($basicLines[$currentLineNum+1]);
         unset( $basicLines[$currentLineNum+1] );
         if($parseOptions->verboseMode)echo "Split line detected. next line unset: ",$currentLineNum,PHP_EOL;
     }
@@ -2053,7 +2597,7 @@ foreach ($basicLines as $CurrentLine)
                 
                 //To make the program automatically start, you need to add a special comment like:
                 
-                #!basic-start=100
+                #!basic-start:100
                 
                 //which will start the BASIC program at line 100 after loading.
                 
@@ -2066,84 +2610,101 @@ foreach ($basicLines as $CurrentLine)
                 //you would create a DFILE with the text "HELLO" "WORLD" spanning over two lines, starting at the second line and the third column. You can omit the trailing (unused) DFILE lines. When converting, they are appended automatically.
                 //By default, an expanded DFILE is created. If you want to use a collapsed DFILE, you can add:
                 
-                //#!dfile-collapsed
+                //#!dfile-collapsed:
 
                 //It is also possible to write code that only appears for a certain target
 
-                //#!machine=ZX81
+                //#!machine:ZX81
 
                 //Would include all code until
 
-                //#!end-machine
+                //#!end-machine:
 
                 //Multiple machines can be listed
 
-                //#!machine=ZX81,LAMBDA,ZX80
+                //#!machine:ZX81,LAMBDA,ZX80
 
                 //Additionally to exclude code for a certain machine
 
-                //#!machine-not=ZX81
+                //#!machine-not:ZX81
+
+                //#!warning: Warning message
+
+                //Batoco gives a warning message
+
+                //#!error: Error message
+
+                //Batoco gives an error message and quits
 
                 //These comments are not nestable
-                $Ptr=$Ptr+2;
-                while((($CurrentLine[$Ptr]!= " ") or ($CurrentLine[$Ptr] != "=") or ($CurrentLine[$Ptr] != ":")) and $Ptr<strlen($CurrentLine))
-                {
-                    $TempBuffer[] = $CurrentLine[$Ptr];
-                    $Ptr++;
-                }
+                $Ptr=strpos($CurrentLine,":");
+                $TempBuffer=strtoupper(substr($CurrentLine,2,$Ptr-2));
                 
-                if($parseOptions->verboseMode)echo strtoupper(implode($TempBuffer)).PHP_EOL;
-                switch(strtoupper(implode($TempBuffer)))
+                if($parseOptions->verboseMode)echo "Found PreProcessor token ".$TempBuffer." in Line No. ".$currentLineNum.PHP_EOL;
+                switch($TempBuffer)
                 {
                     case "BASIC-START":
-                        if($parseOptions->autostartLine == 0x8000)
+                        if($parseOptions->autostartLine != 0x8000)
                         { 
                             Warning("AutoStart line set by parameters, about to be overridden in Line no".$currentLineNum);
-                            //Set $parseOptions->autostartLine to number given
-                            $parseOptions->autostartLine=(int)preg_replace('/[^0-9]/', '', $CurrentLine);
-                            if($parseOptions->verboseMode)echo "Machine Type is ".$parseOptions->machineType.". Setting autostart line, Line No. ".$currentLineNum.PHP_EOL;
                         }
+                        if($parseOptions->useLabels)
+                        {
+                            //If using labels store label and we will adjust it once we have processed all labels
+                            $parseOptions->autostartLine=substr($CurrentLine,$Ptr+1);
+                        }
+                        else
+                        {
+                            //If not using labels store the line number value
+                            $parseOptions->autostartLine=(int)substr($CurrentLine,$Ptr+1);
+                        }
+                        //Set $parseOptions->autostartLine to number given
+                        if($parseOptions->verboseMode)echo "Setting autostart line, Line No. ".$currentLineNum.PHP_EOL;
                         break;
                     case "DFILE":
                         //Add contents after : to a new line of the D_FILE
                         $Ptr++; //Skip :
                         $parseOptions->full_D_FILE = true;
+                        //Clear TempBuffer
                         $TempBuffer=[];
+                        
                         while($Ptr < strlen($CurrentLine))
                         {
                             $TempBuffer[] = $sinclairBasic[$CurrentLine[$Ptr]];
                             $Ptr++;
                         }
                         //Check line length
-                        if($Ptr>=32)
+                        if(count($TempBuffer) > 32)
                             Error("Line is too long for D_FILE line. Line No. ".$currentLineNum);
-                        //Pad line to 32 characters
-                        else while($Ptr<32)
-                             $TempBuffer[] = $sinclairBasic[" "];
-                        //Pad line
-                        $parseOptions->D_FILE = implode($TempBuffer);
                         
-                        if($parseOptions->verboseMode)echo "Machine Type is ".$parseOptions->machineType.". Adding line to D_FILE, Line No. ".$currentLineNum.PHP_EOL;
+                        //Pad line to 32 characters
+                        $TempBuffer = array_pad($TempBuffer,32,$sinclairBasic[" "]);
+                        //Add line to D_FILE
+                        $parseOptions->D_FILE[] = $TempBuffer;
+
+                        if($parseOptions->verboseMode)echo "Adding line '".implode($TempBuffer)."' to D_FILE, Line No. ".$currentLineNum.PHP_EOL;
                         break;
                     case "DFILE-COLLAPSED": 
                         //Check if D_FILE is actually empty if not warn that d_file is not empty
-                        if(!count($parseOptions->D_FILE) === 0)
+                        if(!empty($parseOptions->D_FILE))
                             Warning("D_FILE collapse requested, but D_FILE has content. Request ignored, Line No. ".$currentLineNum);
                         else
                             //Set D_FILE collapsed
                             $parseOptions->full_D_FILE = false;
                         
-                        if($parseOptions->verboseMode)echo "Machine Type is ".$parseOptions->machineType.". Collapsing D_FILE, Line No. ".$currentLineNum.PHP_EOL;
+                        if($parseOptions->verboseMode)echo "Collapsing D_FILE, Line No. ".$currentLineNum.PHP_EOL;
                         break;
                     case "MACHINE":
                         //Get list of machines
-                        $MachineList=explode(",",strtoupper(substring($CurrentLine,$Ptr+1)));
+                        $MachineList=explode(",",strtoupper(substr($CurrentLine,$Ptr+1)));
+                        //var_dump($MachineList);
                         //Check if current machine is in specified list
                         if(in_array($parseOptions->machineType,$MachineList))
                         {
                             if($parseOptions->verboseMode)echo "Machine in include list Line No. ".$currentLineNum.PHP_EOL;
                             //For an include case just need to remove end-machine, so nothing more to do
                             if($parseOptions->verboseMode)echo "Machine Type is ".$parseOptions->machineType.". In array, Line No. ".$currentLineNum.PHP_EOL;
+                            $unSetLines=false;
                         }
                         else
                         {
@@ -2154,33 +2715,46 @@ foreach ($basicLines as $CurrentLine)
                         break;
                     case "MACHINE-NOT":
                         //Get list of machines
-                        $MachineList=explode(",",strtoupper(substring($CurrentLine,$Ptr+1)));
+                        $MachineList=explode(",",strtoupper(substr($CurrentLine,$Ptr+1)));
+                        //var_dump($MachineList);
                         if(!in_array($parseOptions->machineType,$MachineList))
                         {
                             if($parseOptions->verboseMode)echo "Machine in exclude list Line No. ".$currentLineNum.PHP_EOL;
                             
                             if($parseOptions->verboseMode)echo "Machine Type is ".$parseOptions->machineType.". Not in array, Line No. ".$currentLineNum.PHP_EOL;
                             //For a not case unset everyline until end-machine
-                            $unSetLines=true;
+                            $unSetLines=false;
                         }
                         else
                         {
-                            $unSetLines=false;
+                            $unSetLines=true;
                         }
                         break;
                     case "END-MACHINE":
                         $unSetLines = false;
                         if($parseOptions->verboseMode)echo "Machine Type is ".$parseOptions->machineType.". End machine, Line No. ".$currentLineNum.PHP_EOL;
                         break;
+                    case "WARNING":
+                        if(!$unSetLines)
+                            Warning(substr($CurrentLine,$Ptr+1));
+                        break;
+                    case "ERROR":
+                        if(!$unSetLines)
+                            Error(substr($CurrentLine,$Ptr+1));
+                        break;
                 }
                 //Now remove line from listing
                 unset( $basicLines[$currentLineNum] );
+                if($parseOptions->verboseMode)echo "Unsetting Preprocessor line. Line No. ",$currentLineNum,PHP_EOL;
             }
             else
             {
                 unset( $basicLines[$currentLineNum] );
+                if($parseOptions->verboseMode)echo "Unsetting comment line. Line No. ",$currentLineNum,PHP_EOL;
             }
-            break;
+            
+            $currentLineNum++;
+            continue 2;
         case "@":
             //If using labels we now have a label that needs to be assigned a number
             if($parseOptions->useLabels)
@@ -2212,16 +2786,11 @@ foreach ($basicLines as $CurrentLine)
             }
             //Now delete line whether we are using labels or not
             unset( $basicLines[$currentLineNum] );
+            
 
 
             break;
         default:
-            //If we are here it should be a line of code check if it needs deleting
-            if($unSetLines==true)
-            {
-                unset( $basicLines[$currentLineNum] );
-                break;
-            }
             // If using labels add line number
             if($parseOptions->useLabels)
             {
@@ -2233,10 +2802,26 @@ foreach ($basicLines as $CurrentLine)
                 if($parseOptions->useLabels) $Linenum = $Linenum+$parseOptions->setLabelModeIncrement; 
             }
     }
+    //If we are here it should be a line of code check if it needs deleting
+    if($unSetLines==true)
+    {
+        unset( $basicLines[$currentLineNum] );
+        if($parseOptions->verboseMode)echo "Wrong machine type, unsetting line. Line No. ",$currentLineNum,PHP_EOL;
+    }
     $currentLineNum++;
 }
 $basicLines = array_values( $basicLines );
-
+//If using labels see if we have a startline
+if($parseOptions->useLabels)
+{
+    if($parseOptions->autostartLine != 0x8000)
+    {
+        if(in_array($parseOptions->autostartLine,$LabelNumberArray))
+            $parseOptions->autostartLine=$LabelNumberArray[$parseOptions->autostartLine];
+        else
+            Error("Auto start line either contains unknown label or was set on commandline while using label mode.");
+    }
+}
 
 echo "\n\n";
 $currentLineNum = 0;
@@ -2304,6 +2889,14 @@ foreach ($basicLines as $CurrentLine)
     {
           Error("line: ".$currentLineNum." line no. out of range, should be 1 - 9999, found ".$Linenum.PHP_EOL);
     }
+
+    //If ZX81 Before writing line number check if it matches autostart line
+    //If so record current size of output and store that in $parseOptions->autostartLine + programs start address
+    if($Linenum === $parseOptions->autostartLine and $parseOptions->machineType == "ZX81")
+    {
+        if($parseOptions->verboseMode)echo "Found auto start line number: ",$Linenum,PHP_EOL;
+    }
+
     //Write line number to buffer, MSB first, LSB second
     $TempBuffer[] = ($Linenum  & 0xff00) >> 8;
     $TempBuffer[] = $Linenum & 0xff;
@@ -2352,7 +2945,7 @@ foreach ($basicLines as $CurrentLine)
                         {
                             switch($CurrentLine[$Ptr+1])
                             {
-                                case "\\":
+                                //case "\\":
                                 case "@":
                                     $TempBuffer[] = $sinclairBasic[$CurrentLine[$Ptr+1]];
                                     $Ptr = $Ptr + 2;
@@ -2381,22 +2974,16 @@ foreach ($basicLines as $CurrentLine)
                     case "ZX80" : case "ZX81" : case "LAMBDA":
                         switch($CurrentLine[$Ptr+1])
                         {
-                            case "\\":
-                            case "^": //Inverse characters
+                            //case "\\":
+                            case "%": //Inverse characters
                                 $TempBuffer[] = $sinclairBasic[$CurrentLine[$Ptr+1].$CurrentLine[$Ptr+2]];
-                                $Ptr = $Ptr + 2;
-                                continue 3;
-                                break; 
-                            case '\'': case '.': case ':': case ' ': case "'": case '!': case '¦': // block graphics char
-                                $TempBuffer[] = $sinclairBasic[($CurrentLine[$Ptr+1]==" "?"BLANK":$CurrentLine[$Ptr+1]).($CurrentLine[$Ptr+2]==" "?"BLANK":$CurrentLine[$Ptr+2])];
                                 $Ptr = $Ptr + 3;
                                 continue 3;
-                                break;
-                            case '#':
-                                //If we are here then it must be an inverse ccharacter
-                                $TempBuffer[] =  $sinclairBasic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
-                                //or we could do $TempBuffer[] =  $CurrentLine[$Ptr+1] + 128;
-                                $Ptr = $Ptr + 2;
+                                break; 
+                            case '\'': case '.': case ':': case ' ': case "'": case '!': case '>': case '<':case '#':case '~':case ')': case '(':case '@':// block graphics char
+                                //echo ($CurrentLine[$Ptr+1]==" "?"BLANK":$CurrentLine[$Ptr+1]).($CurrentLine[$Ptr+2]==" "?"BLANK":$CurrentLine[$Ptr+2])." returns ".$sinclairBasic[($CurrentLine[$Ptr+1]==" "?"BLANK":$CurrentLine[$Ptr+1]).($CurrentLine[$Ptr+2]==" "?"BLANK":$CurrentLine[$Ptr+2])].PHP_EOL;
+                                $TempBuffer[] = $sinclairBasic[($CurrentLine[$Ptr+1]==" "?"BLANK":$CurrentLine[$Ptr+1]).($CurrentLine[$Ptr+2]==" "?"BLANK":$CurrentLine[$Ptr+2])];
+                                $Ptr = $Ptr + 3;
                                 continue 3;
                                 break;
                         }
@@ -2405,7 +2992,6 @@ foreach ($basicLines as $CurrentLine)
                 }
                 
             }
-            //Sendcontents to $TempBuffer[]
             if($parseOptions->caseSensitive == true)
             {
                 if(array_key_exists($CurrentLine[$Ptr],$sinclairBasic))
@@ -2421,6 +3007,8 @@ foreach ($basicLines as $CurrentLine)
 
             }
         }
+        if($Ptr == strlen($CurrentLine))
+            continue;
         
         //If not in a string then anything starting with a character is either a keyword or variable
         if((ctype_alpha($CurrentLine[$Ptr])) && !$InString && ($Ptr != strlen($CurrentLine)-1) ) 
@@ -2430,12 +3018,17 @@ foreach ($basicLines as $CurrentLine)
             if($Ptr < strlen($CurrentLine))
             {
                 //Need to get all alphabetical characters and $ to allow for SCREEN$,VAL$, etc and String variables
-                while((ctype_alpha($CurrentLine[$Ptr])) or ($CurrentLine[$Ptr] == "$"))
+                while($Ptr < strlen($CurrentLine) and (ctype_alpha($CurrentLine[$Ptr])) or ($CurrentLine[$Ptr] == "$"))
                 {
                     $TextBuffer=$TextBuffer . $CurrentLine[$Ptr];
+                    /*if($Ptr < strlen($CurrentLine)-1)
+                        $Ptr++;
+                    else
+                        continue;*/
+                    //The code commented out above should prevent out of range errors which it does
+                    //However it generates an extra character on the end of the line after $ characters
+                    //For now we just $Ptr++
                     $Ptr++;
-                    if(!($Ptr < strlen($CurrentLine)))
-                    continue;
                 }
 
             }
@@ -2672,11 +3265,6 @@ foreach ($basicLines as $CurrentLine)
             if(array_key_exists(strtoupper($TextBuffer),$sinclairBasicKeywords))
             {
                 $TempBuffer[] = $sinclairBasicKeywords[strtoupper($TextBuffer)];
-                //Eat one extra space unless the is an opening brace next eg SCREEN$(0,0)
-                /*if($Ptr < strlen($CurrentLine))
-                    if(strcmp($CurrentLine[$Ptr],"(" ) == 0)
-                        if(array_key_exists("(",$sinclairBasic))
-                            $TempBuffer[] = $sinclairBasic["("];*/
                 //Eat up a space if there is a space following
                 if(ctype_space($CurrentLine[$Ptr]))
                     $Ptr++;
@@ -2803,7 +3391,7 @@ foreach ($basicLines as $CurrentLine)
         if(!$InString)
         {
             //Check for awkward characters like <=,>= & <>
-            if(strchr("<>",$CurrentLine[$Ptr]))
+            if(strchr("<>*\"",$CurrentLine[$Ptr]))
             {
                 switch($CurrentLine[$Ptr])
                 {
@@ -2830,10 +3418,51 @@ foreach ($basicLines as $CurrentLine)
                         $Ptr=$Ptr+2;
                         continue 2;
                     }
+                    case "*":
+                    if (strcmp("*" ,$CurrentLine[$Ptr])== 0 and strcmp("*" ,$CurrentLine[$Ptr+1])== 0)
+                    {
+                        $TempBuffer[] = $sinclairBasic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
+                        if($parseOptions->verboseMode)echo "Ptr =" . $CurrentLine[$Ptr] . "Ptr+1 =" . $CurrentLine[$Ptr+1] . "Sinclairbasic returns: ". $sinclairBasic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
+                        $Ptr=$Ptr+2;
+                        continue 2;
+                    }
+                    case "\"":
+                    if (strcmp("\"" ,$CurrentLine[$Ptr])== 0 and strcmp("\"" ,$CurrentLine[$Ptr+1])== 0)
+                    {
+                        $TempBuffer[] = $sinclairBasic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
+                        if($parseOptions->verboseMode)echo "Ptr =" . $CurrentLine[$Ptr] . "Ptr+1 =" . $CurrentLine[$Ptr+1] . "Sinclairbasic returns: ". $sinclairBasic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
+                        $Ptr=$Ptr+2;
+                        continue 2;
+                    }
                 }
             }
             //If zx81 or zx80 also need to check ** and ""
-
+            if($parseOptions->machineType == "ZX80"  or $parseOptions->machineType == "ZX81"  or $parseOptions->machineType == "LAMBA")
+            {
+                //Check for awkward characters like **,"" raise to power of and display file quotes
+                if(strchr("*\"",$CurrentLine[$Ptr]))
+                {
+                    switch($CurrentLine[$Ptr])
+                    {
+                        case "*":
+                            if (strcmp("*" ,$CurrentLine[$Ptr])== 0 and strcmp("*" ,$CurrentLine[$Ptr+1])== 0)
+                            {
+                                $TempBuffer[] = $sinclairBasic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
+                                if($parseOptions->verboseMode)echo "Ptr =" . $CurrentLine[$Ptr] . "Ptr+1 =" . $CurrentLine[$Ptr+1] . "Sinclairbasic returns: ". $sinclairBasic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
+                                $Ptr=$Ptr+2;
+                                continue 2;
+                            }
+                        case "\"":
+                            if (strcmp("\"" ,$CurrentLine[$Ptr])== 0 and strcmp("\"" ,$CurrentLine[$Ptr+1])== 0)
+                            {
+                                $TempBuffer[] = $sinclairBasic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
+                                if($parseOptions->verboseMode)echo "Ptr =" . $CurrentLine[$Ptr] . "Ptr+1 =" . $CurrentLine[$Ptr+1] . "Sinclairbasic returns: ". $sinclairBasic[$CurrentLine[$Ptr].$CurrentLine[$Ptr+1]];
+                                $Ptr=$Ptr+2;
+                                continue 2;
+                            }
+                    }
+                }
+            }
             //Anything left just converts directly
             if(!ctype_space($CurrentLine[$Ptr]))
                 if(array_key_exists($CurrentLine[$Ptr],$sinclairBasic))
@@ -2878,7 +3507,7 @@ switch($parseOptions->outputFormat)
     case "RAW" :
         //Do nothing as file has already been written
         break;
-    case "+3" :
+    case "DOS" :
         prependPlus3Header($parseOptions);
         break;
     case "P81" :
@@ -2890,6 +3519,15 @@ switch($parseOptions->outputFormat)
     case "LAMBDA":
         prependLambdaTapeHeader($parseOptions,$sinclairBasic);
         break;
+}
+
+if($parseOptions->outputTZX)
+{
+    //SAnitY ChEckS
+    if($parseOptions->machineType != "SPECTRUM" and $parseOptions->machineType != "TIMEX")
+        Error("TZX file type is only supported for SPECTRUM and TIMEX Tape based outputs.");
+    else
+        prependTZXHeader($parseOptions);
 }
 
 /*
@@ -2933,93 +3571,10 @@ Add filename endings .P,.O,.TAP,.TZX
 
 Output WAV support
 
-The generated BASIC text format is mainly similar to the zxtext2p format. The main difference is that labelled code is not supported. However, this extension uses the same escape codes and graphic codes.
-
-Additionally, a "bracketized tokens" mode is supported. Each command token can be enclosed in square brackets (e.g. "[PRINT]") to clearly differentiate it from single characters (e.g. "P," "R," "I," "N," "T").
-
-Furthermore, it is possible to add more information into the comment lines. Normal comment lines (like in zxtext2p) start with a '#'. If a line starts with '#!', it is a special comment that can define additional properties for the P-File generation.
-
-If you don't use any '#!' in your BASIC program, a P-File is created that contains the BASIC program, but an empty DFILE (blank screen) and no BASIC variables section. When you load the P-File, it is loaded but not started.
-
-To make the program automatically start, you need to add a special comment like:
-
-#!basic-start=100
-
-which will start the BASIC program at line 100 after loading.
-
-With lines like:
-
-#!dfile:
-#!dfile:   HELLO
-#!dfile:   WORLD
-
-you would create a DFILE with the text "HELLO" "WORLD" spanning over two lines, starting at the second line and the third column. You can omit the trailing (unused) DFILE lines. When converting, they are appended automatically. By default, an expanded DFILE is created. If you want to use a collapsed DFILE, you can add:
-
-#!dfile-collapsed
-
-For completeness, here is also the BASIC variables section, e.g.:
-
-#!basic-vars:[177,166,168,185,174]
-
-This will hold the data for the BASIC variables used. It is not something you should normally edit yourself. It is generated by the P-File conversion to allow converting the BASIC program back to a P-File while maintaining the variables section.*/
 
 
-/*
-ZX80
+TO DO
 
-SYS VARS
-[1] =255 //Address 16384 - 1 Byte - 1 Less than runtime error number
-[2] = 0  //Address 16385 - 1 Byte - Sundry flags which control BASIC system
-[3] =   //Address 16386 - 1 Word - Statement number of current statement
-[4] =
-[5] =   //Address 16388 - 1 word - position in RAM of K or L cursor last line
-[6] =
-[7] =   //Address 16390 - 1 word - statement number of > Cursor
-[8] = 
-[9] =   //Address 16392 - 1 word - VARS
-[10] =
-[11] =  //Address 16394 - 1 word - E-LINE - Space assigned for input or edit lines, cleared after use
-[12] =
-[13] =  //Address 16396 - 1 word - D-LINE - Always contains 25 newline characters, first and last bytes are 0x76, in between are 24 lines 0 - 32 characters each
-[14] =
-[15] =  //Address 16398 - 1 Word - DF-EA - points to start of the lower part of the screen this is between D-LINE and DF-END
-[16] =
-[17] =  //Address 16400 - 1 Word - DF-END - points to end of display file
-[18] =
-[19] =  //Address 16402 - 1 Byte - Number of lines in lower half of screen
-[20] =  //Address 16403 - 1 Word -  Statement number of first line on screen
-[21] =
-[22] =  //Address 16405 - 1 Word - Address of charater or token preceding the S marker
-[23] =
-[24] =  //Address 16407 - 1 Word - Statement number that CONTINUE jumps to
-[25] = 
-[26] =  //Address 16409 - 1 Byte - sundry flags which control the syntax analysis
-[27] =
-[28] =  //Address 16410 - 1 Word - Address of next item in syntax table
-[29] =
-[30] =  //Address 16412 - 1 Word - Seed for random number generator
-[31] =
-[32] =  //Address 16414 - 1 word - Number of frames since the ZX-80 was switched on
-[33] =
-[34] =  //Address 16416 - 1 Word - Address of 1st character of 1st variable name
-[35]
-[36] =  //Address 16418 - 1 Word - Value of last expession or variable
-[37]
-[38] =  //Address 16420 - 1 Byte - position of next line character to be written to screen
-[39] =  //Address 16421 - 1 Byte - Position of current line on screen
-[40] =  //Address 16422 - 1 Byte - Address of character after closing bracket of PEEK or newline after POKE statement
+4. Fix autorun address (for ZX81,Lambda, ZX80?)*/
 
-SYSVARS begin at 16384
-Program begins at 16424
-VARS begin at 16424 + Program length
-After vars is 1 Byte 0x80
-E_LINE is address after this byte
-D_FILE is after E_LINE
-After end of D_File is spare space
-then the stack pointed by SP
-
-Each program line is same as ZX Spectrum, except no line length stored and line end is 0x76
-
-Variables are stored as Integers
-*/
 ?>
