@@ -12,7 +12,7 @@
 //Set route to php for unix environments
 #!/usr/bin/php
 
-//Machine types SPECTRUM, LAMBDA, ZX80, ZX81, TIMEX, PLUS3, NEXT
+//Machine types SPECTRUM, NF300, LAMBDA1, LAMBDA2, ZX80, ZX81, TIMEX, PLUS3, NEXT
 
 global $parseOptions;
 global $basicLines;
@@ -20,7 +20,7 @@ global $basicLines;
 
 ini_set("auto_detect_line_endings", true);
 
-define("VERSION_NUMBER","0.1.9");
+define("VERSION_NUMBER","0.2.0");
 define("DEFAULT_OUTPUT","out.tap");
 define("DEFAULT_OUTPUT_81","out.p");
 define("DEFAULT_OUTPUT_80","out.o");
@@ -50,7 +50,7 @@ function frexp ( $number, $machineType )
     
     $returnArray = array();
     //Check if not a float and between -65535 and 65535
-    if(($number==(int)$number && $number>=-65535 && $number<=65535 && $machineType!="ZX81") or $machineType == "ZX80")//NOTE ZX81 only stores variables as floats
+    if(($number==(int)$number && $number>=-65535 && $number<=65535 && $machineType!="ZX81" and $machineType!="LAMBDA1" and $machineType!="LAMBDA2"and $machineType!="NF300") or $machineType == "ZX80")//NOTE ZX81 only stores variables as floats
     {
         /*There is an alternative way of storing whole numbers between -65535 and +65535:
 
@@ -110,7 +110,7 @@ function frexp ( $number, $machineType )
          $mantissa &= 0x7FFFFFFF;
         
         //A numerical constant in the program is followed by its binary form, using the character CHR$ 14 followed by five bytes for the number itself.
-        if($machineType=="ZX81")
+        if($machineType=="ZX81" or $machineType=="LAMBDA1" or $machineType=="LAMBDA2" or $machineType=="NF300")
             $returnArray[] = 0X7E;
         else
             $returnArray[] = 0x0E; 
@@ -141,7 +141,7 @@ function usageHelp() {
     echo "        -l      use labels rather than line numbers.\n";
     echo "        -s      in labels mode, set starting line number.\n";
     echo "Settings Flags";
-    echo "        -m      set machine type, must be followed by one of these options SPECTRUM, LAMBDA, ZX80, ZX81, TIMEX, PLUS3, NEXT";
+    echo "        -m      set machine type, must be followed by one of these options SPECTRUM, LAMBDA1, LAMBDA2, ZX80, ZX81, TIMEX, PLUS3, NEXT, NF300";
     echo "        -a      set auto-start line of basic file (default none).\n";
     echo "        -n      set Spectrum filename (to be given in tape header).\n"; 
     echo "        -o      specify output file (default",DEFAULT_OUTPUT,").\n";
@@ -311,6 +311,7 @@ function parseURLOptions(&$parseOptions)
     // 3=on                     : output a +3DOS compatible file (default is .tap file).\n";
     // s=<StartNumber>          : in labels mode, set starting line number ";
     // input=<Input filename>   : Name of the file to read and convert
+    // z=on                     : output a TZX file (only support for SPECTRUM or TIMEX)
 
     //e.g. http://localhost/zx_htm2tap/batoco.php?input=inputfile.bas&v=on&l=on&n=ZMB-TEST&o=outputfile.tap
     
@@ -781,13 +782,6 @@ function prependLambdaTapeHeader(&$parseOptions,$sinclairBasic)
     $inputHandle = fopen($parseOptions->outputFilename, 'r') or die("Unable to open file!");
     $outputHandle = fopen("prepend.tmp", "w") or die("Unable to open file!");
 
-    //Write out the filename
-   /* $StrPtr=0;
-    while(($StrPtr < strlen($parseOptions->spectrumFilename)) and ($StrPtr < 9))
-    {
-        fputs($outputHandle, chr($sinclairBasic[$parseOptions->spectrumFilename[$StrPtr]]),1);
-        $StrPtr++;
-    }*/
 
     //Set D_File size, Lambda always has a full sized D-FILE
     $D_FILE_SIZE = 0x0318;
@@ -859,7 +853,6 @@ function prependLambdaTapeHeader(&$parseOptions,$sinclairBasic)
     $header[114] = 0x76; //BLINK - 16507 - 1 Word
     $header[115] = 0x43; //BLINK - 16507 - 1 Word
     
-    echo var_dump($header);
     // Dump header
     for ($i=0;$i<116;$i++) fputs($outputHandle, chr($header[$i]), 1);
 
@@ -999,7 +992,8 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
             }
             break;
         
-        case "LAMBDA" :
+        case "LAMBDA1" :
+            //LAMBDA1 is the same as LAMBDA2, except 2 has extra keywords for Colour,etc
             initLambdaArrays($keywordArray, $characterArray);
             $parseOptions->caseSensitive = false;
             $parseOptions->lineEnding = 0x76;
@@ -1008,6 +1002,24 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
                 $parseOptions->outputFilename = DEFAULT_OUTPUT_81;
             break;
         
+        case "LAMBDA2" :
+            initLambda2Arrays($keywordArray, $characterArray);
+            $parseOptions->caseSensitive = false;
+            $parseOptions->lineEnding = 0x76;
+            $parseOptions->outputFormat = "LAMBDA";
+            if($parseOptions->outputFilename == DEFAULT_OUTPUT)
+                $parseOptions->outputFilename = DEFAULT_OUTPUT_81;
+            break;
+        
+        case "NF300" :
+            initNF300Arrays($keywordArray, $characterArray);
+            $parseOptions->caseSensitive = false;
+            $parseOptions->lineEnding = 0x76;
+            $parseOptions->outputFormat = "LAMBDA";
+            if($parseOptions->outputFilename == DEFAULT_OUTPUT)
+                $parseOptions->outputFilename = DEFAULT_OUTPUT_81;
+            break;
+            
         case "ZX80" :
             initZX80Arrays($keywordArray, $characterArray);
             $parseOptions->caseSensitive = false;
@@ -1036,7 +1048,7 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
             break;
 
         default :
-            Error("Invalid machine type specified: Valid machines are SPECTRUM, LAMBDA, ZX80, ZX81, TIMEX, PLUS3, NEXT");
+            Error("Invalid machine type specified: Valid machines are SPECTRUM, LAMBDA1, LAMBDA2, ZX80, ZX81, TIMEX, PLUS3, NEXT");
         }
 }
 
@@ -1056,7 +1068,9 @@ function checkOutputFile(&$parseOptions)
             case "NEXT" :
                 break;
             case "ZX81" :
-            case "LAMBDA" :
+            case "NF300" :
+            case "LAMBDA1" :
+            case "LAMBDA2" :
                 $parseOptions->outputFilename=$parseOptions->outputFilename.".P";
                 break;
             case "ZX80" :
@@ -1082,7 +1096,7 @@ function checkOutputFile(&$parseOptions)
                     Warning("Unusal file extension ".$Extension." given for machine type ".$parseOptions->machineType.". Trusting you know best.");
                 break;
             case "P":
-                if($parseOptions->machineType !== "LAMBDA" and $parseOptions->machineType !== "ZX81")
+                if($parseOptions->machineType !== "LAMBDA1" and $parseOptions->machineType !== "LAMBDA2" and $parseOptions->machineType !== "ZX81" and $parseOptions->machineType !== "NF300")
                     Warning("Unusal file extension ".$Extension." given for machine type ".$parseOptions->machineType.". Trusting you know best.");
                 break;
             case "O":
@@ -1578,9 +1592,6 @@ function initLambdaArrays(&$keywordArray, &$characterArray)
         "RND"=>67,
         "INKEY$"=>68,
         "PI"=>69,
-	    "INK"=>70,
-	    "PAPER"=>71,
-	    "BORDER"=>72,
         "CODE"=>192,
         "VAL"=>193,
         "LEN"=>194,
@@ -1642,6 +1653,19 @@ function initLambdaArrays(&$keywordArray, &$characterArray)
         "RETURN"=>254,
         "COPY"=>255,
     );
+}
+function initLambda2Arrays(&$keywordArray, &$characterArray)
+{
+    //Call Lambda setup and then replace the few keywords that are different
+    initLambdaArrays($keywordArray, $characterArray);
+    $keywordArray += ["INK" => 70, "PAPER" => 71, "BORDER" => 72];
+}
+
+function initNF300Arrays(&$keywordArray, &$characterArray)
+{
+    //Call Lambda2 setup and then replace the few keywords that are different
+    initLambda2Arrays($keywordArray, $characterArray);
+    $keywordArray += ["READ" => 73, "DATA" => 74, "RESTORE" => 75];
 }
 
 function initZX81Arrays(&$keywordArray, &$characterArray)
@@ -2622,7 +2646,7 @@ foreach ($basicLines as $CurrentLine)
 
                 //Multiple machines can be listed
 
-                //#!machine:ZX81,LAMBDA,ZX80
+                //#!machine:ZX81,LAMBDA1, LAMBDA2,ZX80
 
                 //Additionally to exclude code for a certain machine
 
@@ -2971,7 +2995,7 @@ foreach ($basicLines as $CurrentLine)
                             }
                         }
                         break;
-                    case "ZX80" : case "ZX81" : case "LAMBDA":
+                    case "ZX80" : case "ZX81" : case "LAMBDA1":  case "LAMBDA2": case "NF300":
                         switch($CurrentLine[$Ptr+1])
                         {
                             //case "\\":
