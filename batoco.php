@@ -45,12 +45,12 @@ function strReplaceAssoc(array $replace, $subject) {
  }
 
 
-function frexp ( $number, $machineType ) 
+function frexp ( $number, $subMachine ) 
 {
     
     $returnArray = array();
     //Check if not a float and between -65535 and 65535
-    if(($number==(int)$number && $number>=-65535 && $number<=65535 && $machineType!="ZX81" and $machineType!="LAMBDA1" and $machineType!="LAMBDA2"and $machineType!="NF300") or $machineType == "ZX80")//NOTE ZX81 only stores variables as floats
+    if(($number==(int)$number && $number>=-65535 && $number<=65535 && $subMachine!="ZX81") or $subMachine == "ZX80")//NOTE ZX81 only stores variables as floats
     {
         /*There is an alternative way of storing whole numbers between -65535 and +65535:
 
@@ -110,7 +110,7 @@ function frexp ( $number, $machineType )
          $mantissa &= 0x7FFFFFFF;
         
         //A numerical constant in the program is followed by its binary form, using the character CHR$ 14 followed by five bytes for the number itself.
-        if($machineType=="ZX81" or $machineType=="LAMBDA1" or $machineType=="LAMBDA2" or $machineType=="NF300")
+        if($subMachine="ZX81")
             $returnArray[] = 0X7E;
         else
             $returnArray[] = 0x0E; 
@@ -963,6 +963,7 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
     {
         case "SPECTRUM" :
             initSpectrumArrays($keywordArray, $characterArray);
+            $parseOptions->subMachine = "SPECTRUM";
             $parseOptions->caseSensitive = true;
             $parseOptions->lineEnding = 0x0D;
             if($parseOptions->outputTZX)
@@ -974,6 +975,7 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
         
         case "PLUS3" :
             initSpectrumArrays($keywordArray, $characterArray);
+            $parseOptions->subMachine = "SPECTRUM";
             $parseOptions->caseSensitive = true;
             $parseOptions->lineEnding = 0x0D;
             if($parseOptions->outputFilename == DEFAULT_OUTPUT)
@@ -983,6 +985,7 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
         
         case "TIMEX" :
             initTimexArrays($keywordArray, $characterArray);
+            $parseOptions->subMachine = "SPECTRUM";
             $parseOptions->caseSensitive = true;
             $parseOptions->lineEnding = 0x0D;
             if($parseOptions->outputTZX)
@@ -995,6 +998,7 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
         case "LAMBDA1" :
             //LAMBDA1 is the same as LAMBDA2, except 2 has extra keywords for Colour,etc
             initLambdaArrays($keywordArray, $characterArray);
+            $parseOptions->subMachine = "ZX81";
             $parseOptions->caseSensitive = false;
             $parseOptions->lineEnding = 0x76;
             $parseOptions->outputFormat = "LAMBDA";
@@ -1004,6 +1008,7 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
         
         case "LAMBDA2" :
             initLambda2Arrays($keywordArray, $characterArray);
+            $parseOptions->subMachine = "ZX81";
             $parseOptions->caseSensitive = false;
             $parseOptions->lineEnding = 0x76;
             $parseOptions->outputFormat = "LAMBDA";
@@ -1013,6 +1018,7 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
         
         case "NF300" :
             initNF300Arrays($keywordArray, $characterArray);
+            $parseOptions->subMachine = "ZX81";
             $parseOptions->caseSensitive = false;
             $parseOptions->lineEnding = 0x76;
             $parseOptions->outputFormat = "LAMBDA";
@@ -1022,6 +1028,7 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
             
         case "ZX80" :
             initZX80Arrays($keywordArray, $characterArray);
+            $parseOptions->subMachine = "ZX80";
             $parseOptions->caseSensitive = false;
             $parseOptions->lineEnding = 0x76;
             $parseOptions->outputFormat = "O80";
@@ -1031,6 +1038,7 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
             
         case "ZX81" :
             initZX81Arrays($keywordArray, $characterArray);
+            $parseOptions->subMachine = "ZX81";
             $parseOptions->caseSensitive = false;
             $parseOptions->lineEnding = 0x76;
             $parseOptions->outputFormat = "P81";
@@ -1040,6 +1048,7 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
             
         case "NEXT" :
             initZX81Arrays($keywordArray, $characterArray);
+            $parseOptions->subMachine = "SPECTRUM";
             $parseOptions->caseSensitive = true;
             $parseOptions->lineEnding = 0x0D;
             if($parseOptions->outputFilename == DEFAULT_OUTPUT)
@@ -1096,7 +1105,7 @@ function checkOutputFile(&$parseOptions)
                     Warning("Unusal file extension ".$Extension." given for machine type ".$parseOptions->machineType.". Trusting you know best.");
                 break;
             case "P":
-                if($parseOptions->machineType !== "LAMBDA1" and $parseOptions->machineType !== "LAMBDA2" and $parseOptions->machineType !== "ZX81" and $parseOptions->machineType !== "NF300")
+                if($parseOptions->subMachine = "ZX81")
                     Warning("Unusal file extension ".$Extension." given for machine type ".$parseOptions->machineType.". Trusting you know best.");
                 break;
             case "O":
@@ -2485,7 +2494,8 @@ $parseOptions->setLabelModeIncrement = 2;
 $parseOptions->setLabelsModeStartLineNumber = 10;
 $parseOptions->inputFilename = "default.txt";
 $parseOptions->outputFormat = "TAP";
-$parseOptions->machineType = "SPECTRUM";
+$parseOptions->machineType = "SPECTRUM"; //This would allow for greater range of machine types SPECTRUM16K,SPECTRUM48K,LAMBDA1,LAMBDA2,etc for users to code for
+$parseOptions->subMachine = "SPECTRUM"; //While internally the submachine treats them alike where needed
 $parseOptions->caseSensitive = true; //ZX80,ZX81 and Lambda only do upper case, these would be false
 $parseOptions->firstLineNum = -1;
 $parseOptions->full_D_FILE = true;
@@ -2514,7 +2524,7 @@ $sinclairBasic = array();
 initArrays($sinclairBasicKeywords, $sinclairBasic, $parseOptions);
 checkOutputFile($parseOptions);
 
-if($parseOptions->verboseMode)echo "Machine Type = ".$parseOptions->machineType.PHP_EOL;
+if($parseOptions->verboseMode)echo "Machine Type = ".$parseOptions->machineType." Sub machine type = ".$parseOptions->subMachine.PHP_EOL;
 
 //SaNiTy checks
 
@@ -2914,9 +2924,10 @@ foreach ($basicLines as $CurrentLine)
           Error("line: ".$currentLineNum." line no. out of range, should be 1 - 9999, found ".$Linenum.PHP_EOL);
     }
 
+        //TO DO
     //If ZX81 Before writing line number check if it matches autostart line
     //If so record current size of output and store that in $parseOptions->autostartLine + programs start address
-    if($Linenum === $parseOptions->autostartLine and $parseOptions->machineType == "ZX81")
+    if($Linenum === $parseOptions->autostartLine and $parseOptions->subMachine = "ZX81")
     {
         if($parseOptions->verboseMode)echo "Found auto start line number: ",$Linenum,PHP_EOL;
     }
@@ -2956,9 +2967,9 @@ foreach ($basicLines as $CurrentLine)
             //Deal with blocks, escape characters here here
             if($CurrentLine[$Ptr] == "\\")
             {
-                switch($parseOptions->machineType)
+                switch($parseOptions->subMachine)
                 {
-                    case "SPECTRUM": case "NEXT": case "TIMEX": case "PLUS3":
+                    case "SPECTRUM":
                         if(ctype_alpha($CurrentLine[$Ptr+1]) && !strchr("VWXYZvwxyz",$CurrentLine[$Ptr+1]))
                         {
                             $TempBuffer[] = $sinclairBasic["(".$CurrentLine[$Ptr+1].")"];
@@ -2995,7 +3006,7 @@ foreach ($basicLines as $CurrentLine)
                             }
                         }
                         break;
-                    case "ZX80" : case "ZX81" : case "LAMBDA1":  case "LAMBDA2": case "NF300":
+                    case "ZX80" : case "ZX81" :
                         switch($CurrentLine[$Ptr+1])
                         {
                             //case "\\":
@@ -3206,7 +3217,7 @@ foreach ($basicLines as $CurrentLine)
 
                 //Sinclair basic then stores the value of the binary number after the physical representation
                 if($parseOptions->verboseMode)echo "Temp number = " . $TempBinNumber . PHP_EOL;
-                $exponentMantissaArray = frexp($TempBinNumber,$parseOptions->machineType);
+                $exponentMantissaArray = frexp($TempBinNumber,$parseOptions->subMachine);
                 foreach($exponentMantissaArray as $element)
                 {
                     $TempBuffer[] = $element;
@@ -3403,7 +3414,7 @@ foreach ($basicLines as $CurrentLine)
                     break;
             }
             if($parseOptions->verboseMode)echo "Temp number buffer =".$TempNumberBuffer .PHP_EOL;
-            $exponentMantissaArray = frexp(floatval($TempNumberBuffer),$parseOptions->machineType);
+            $exponentMantissaArray = frexp(floatval($TempNumberBuffer),$parseOptions->subMachine);
             foreach($exponentMantissaArray as $element)
             {
                 $TempBuffer[] = $element;
@@ -3461,7 +3472,7 @@ foreach ($basicLines as $CurrentLine)
                 }
             }
             //If zx81 or zx80 also need to check ** and ""
-            if($parseOptions->machineType == "ZX80"  or $parseOptions->machineType == "ZX81"  or $parseOptions->machineType == "LAMBA")
+            if($parseOptions->machineType == "ZX80"  or $parseOptions->subMachine = "ZX81")
             {
                 //Check for awkward characters like **,"" raise to power of and display file quotes
                 if(strchr("*\"",$CurrentLine[$Ptr]))
