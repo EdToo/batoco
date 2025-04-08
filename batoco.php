@@ -72,7 +72,6 @@ function frexp ( $number, $subMachine )
     {
         $number = abs($number);
         $exponent = 0;
-        
         // Normalize the number
         while ($number >= 1.0) {
             $number /= 2.0;
@@ -108,9 +107,9 @@ function frexp ( $number, $subMachine )
 
          /* finally, zero out the top bit */
          $mantissa &= 0x7FFFFFFF;
-        
+        echo "Submachine=".$subMachine;
         //A numerical constant in the program is followed by its binary form, using the character CHR$ 14 followed by five bytes for the number itself.
-        if($subMachine="ZX81")
+        if($subMachine=="ZX81")
             $returnArray[] = 0X7E;
         else
             $returnArray[] = 0x0E; 
@@ -1105,7 +1104,7 @@ function checkOutputFile(&$parseOptions)
                     Warning("Unusal file extension ".$Extension." given for machine type ".$parseOptions->machineType.". Trusting you know best.");
                 break;
             case "P":
-                if($parseOptions->subMachine = "ZX81")
+                if($parseOptions->subMachine == "ZX81")
                     Warning("Unusal file extension ".$Extension." given for machine type ".$parseOptions->machineType.". Trusting you know best.");
                 break;
             case "O":
@@ -2747,6 +2746,25 @@ foreach ($basicLines as $CurrentLine)
                         }
                         //Need to remember to remove end-machine line from listing
                         break;
+                    case "MACHINE-SUB-TYPE":
+                        //Get list of machines
+                        $MachineList=explode(",",strtoupper(substr($CurrentLine,$Ptr+1)));
+                        //var_dump($MachineList);
+                        //Check if current machine is in specified list
+                        if(in_array($parseOptions->machine,$MachineList))
+                        {
+                            if($parseOptions->verboseMode)echo "Machine in include list Line No. ".$currentLineNum.PHP_EOL;
+                            //For an include case just need to remove end-machine, so nothing more to do
+                            if($parseOptions->verboseMode)echo "Machine Type is ".$parseOptions->subMachine.". In array, Line No. ".$currentLineNum.PHP_EOL;
+                            $unSetLines=false;
+                        }
+                        else
+                        {
+                            //Need to unset everything up to end-machine
+                            $unSetLines=true;
+                        }
+                        //Need to remember to remove end-machine line from listing
+                        break;
                     case "MACHINE-NOT":
                         //Get list of machines
                         $MachineList=explode(",",strtoupper(substr($CurrentLine,$Ptr+1)));
@@ -2764,6 +2782,24 @@ foreach ($basicLines as $CurrentLine)
                             $unSetLines=true;
                         }
                         break;
+                    
+                    case "MACHINE-NOT-SUB-TYPE":
+                        //Get list of machines
+                        $MachineList=explode(",",strtoupper(substr($CurrentLine,$Ptr+1)));
+                        //var_dump($MachineList);
+                        if(!in_array($parseOptions->subMachine,$MachineList))
+                        {
+                            if($parseOptions->verboseMode)echo "Machine in exclude list Line No. ".$currentLineNum.PHP_EOL;
+                                
+                            if($parseOptions->verboseMode)echo "Machine Type is ".$parseOptions->subMachine.". Not in array, Line No. ".$currentLineNum.PHP_EOL;
+                             //For a not case unset everyline until end-machine
+                            $unSetLines=false;
+                        }
+                        else
+                        {
+                            $unSetLines=true;
+                        }
+                        break;    
                     case "END-MACHINE":
                         $unSetLines = false;
                         if($parseOptions->verboseMode)echo "Machine Type is ".$parseOptions->machineType.". End machine, Line No. ".$currentLineNum.PHP_EOL;
@@ -2927,7 +2963,7 @@ foreach ($basicLines as $CurrentLine)
         //TO DO
     //If ZX81 Before writing line number check if it matches autostart line
     //If so record current size of output and store that in $parseOptions->autostartLine + programs start address
-    if($Linenum === $parseOptions->autostartLine and $parseOptions->subMachine = "ZX81")
+    if($Linenum === $parseOptions->autostartLine and $parseOptions->subMachine == "ZX81")
     {
         if($parseOptions->verboseMode)echo "Found auto start line number: ",$Linenum,PHP_EOL;
     }
@@ -3472,7 +3508,7 @@ foreach ($basicLines as $CurrentLine)
                 }
             }
             //If zx81 or zx80 also need to check ** and ""
-            if($parseOptions->machineType == "ZX80"  or $parseOptions->subMachine = "ZX81")
+            if($parseOptions->machineType == "ZX80"  or $parseOptions->subMachine == "ZX81")
             {
                 //Check for awkward characters like **,"" raise to power of and display file quotes
                 if(strchr("*\"",$CurrentLine[$Ptr]))
