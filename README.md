@@ -17,8 +17,6 @@ It can also be called via a URL using POST or GET to send the arguments
 e.g. http://localhost/batoco.php?input=.\Test_Files\ZMAKEBAS_Test_Labels.bas&l=on&n=ZMB-TEST&o=ZMAKEBASTestPHP.tap
  
 It is functionally equivalent to zmakebas.c though it is mostly written from scratch. It has all the extra features, like labels and shortcuts to embed UDGs.
-
-It also doesn't have the extended features like Spectrum Next, ZX81 support.
  
 It supports these options from the commandline though some are currently non-functional
  
