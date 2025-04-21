@@ -44,13 +44,20 @@ function strReplaceAssoc(array $replace, $subject) {
  
  }
 
+ // Get string from between delimiters
+ function getDelimitedString($string,$openingdelimiter,$closingdelimiter)
+ {
+    $pattern = "/".preg_quote($openingdelimiter, '/')."(.*?)".preg_quote($closingdelimiter, '/')."/";
+    preg_match($pattern, $string, Smatches);
+    return $matches[1] ?? '';
+ }
 
 function frexp ( $number, $subMachine ) 
 {
     
     $returnArray = array();
     //Check if not a float and between -65535 and 65535
-    if(($number==(int)$number && $number>=-65535 && $number<=65535 && $subMachine!="ZX81") or $subMachine == "ZX80")//NOTE ZX81 only stores variables as floats
+    if(($number==(int)$number && $number>=-65535 && $number<=65535 && $subMachine!="ZX81") or $subMachine == "ZX80")//NOTE ZX81 only stores variables as floats, ZX80 as integers
     {
         /*There is an alternative way of storing whole numbers between -65535 and +65535:
 
@@ -58,15 +65,23 @@ function frexp ( $number, $subMachine )
         the second byte is 0 for a positive number, FFh for a negative one.
         the third and fourth bytes are the less (b7:0) and more (b15:8) significant bytes of the number (or the number +131072 if it is negative).
         the fifth byte is 0.  */
-        $returnArray[] = 0x0E; 
-        $returnArray[] = 0x00;
-        if($number < 0)
-            $returnArray[] = 0xFF;
+        if($subMachine=="ZX80")
+        {
+            $returnArray=[] ;
+        }
         else
+        {
+            $returnArray[] = 0x0E; 
             $returnArray[] = 0x00;
-        $returnArray[] = ($number & 0xff);
-        $returnArray[] = ($number & 0xff00) >> 8;
-        $returnArray[] = 0x00;
+            if($number < 0)
+                $returnArray[] = 0xFF;
+            else
+                $returnArray[] = 0x00;
+            $returnArray[] = ($number & 0xff);
+            $returnArray[] = ($number & 0xff00) >> 8;
+            $returnArray[] = 0x00;
+        }
+            
     }
     else
     {
@@ -146,6 +161,7 @@ function usageHelp() {
     echo "        -o      specify output file (default",DEFAULT_OUTPUT,").\n";
     echo "        -r      output raw headerless file (default is .tap file).\n";
     echo "        -z      output TZX file(only supported for SPECTRUM and TIMEX.\n";
+    echo "        -f      tokenise the contents of REM statements.\n";
     echo "Deprecated Flags";
     echo "        -3      output a +3DOS compatible file (default is .tap file).\n";
     echo "        -p      output .p instead (set ZX81 mode).\n";
@@ -195,6 +211,7 @@ function parseCliOptions($argv, $nextParam, &$parseOptions)
                 case "-S" : $parseOptions->setLabelsModeStartLineNumber = $argv[$nextParam];break;
                 case "-M" : $parseOptions->machineType = $argv[$nextParam];break;
                 case "-Z" : $parseOptions->outputTZX = true;break;
+                case "-F" : $parseOptions->parseREM = true;break;
                 default: Error("$currentParam is not a valid option");
             }
         } 
@@ -217,12 +234,13 @@ function parsePostOptions(&$parseOptions)
     // 3=on                     : output a +3DOS compatible file (default is .tap file).\n";
     // s=<StartNumber>          :in labels mode, set starting line number ";
     // z=on                     : output a TZX file (only support for SPECTRUM or TIMEX)
+    // f=on                     : Tokenise the contents of REM statements
 
     //e.g. http://localhost/batoco.php?input=input.txt&n=Game&o=Game.tap
 
     if (is_array($_POST)) 
     {
-        $ok_key_names = ['input', 'v', 'a', 'i', 'l', 'n', 'o', 'p', 'r', '3', 's','m','z'];
+        $ok_key_names = ['input', 'v', 'a', 'i', 'l', 'n', 'o', 'p', 'r', '3', 's','m','z','f'];
         $ok_keys = array_flip(array_filter($ok_key_names, function($arr_key) {
             return array_key_exists($arr_key, $_POST);
         }));
@@ -294,7 +312,10 @@ function parsePostOptions(&$parseOptions)
     {
         $parseOptions->outputTZX = true;
     }
-
+    if (array_key_exists("F",$a) )
+    {
+        $parseOptions->parseREM = true;
+    }
 }
 function parseURLOptions(&$parseOptions)
 {
@@ -311,11 +332,12 @@ function parseURLOptions(&$parseOptions)
     // s=<StartNumber>          : in labels mode, set starting line number ";
     // input=<Input filename>   : Name of the file to read and convert
     // z=on                     : output a TZX file (only support for SPECTRUM or TIMEX)
+    // f=on                     : Tokenise the contents of REM statements
 
     //e.g. http://localhost/zx_htm2tap/batoco.php?input=inputfile.bas&v=on&l=on&n=ZMB-TEST&o=outputfile.tap
     
     if (is_array($_GET)) {
-        $ok_key_names = ['input', 'v', 'a', 'i', 'l', 'n', 'o', 'p', 'r', '3', 's','m','z'];
+        $ok_key_names = ['input', 'v', 'a', 'i', 'l', 'n', 'o', 'p', 'r', '3', 's','m','z','f'];
         $ok_keys = array_flip(array_filter($ok_key_names, function($arr_key) {
             return array_key_exists($arr_key, $_GET);
         }));
@@ -386,6 +408,10 @@ function parseURLOptions(&$parseOptions)
     if (array_key_exists("Z",$a) )
     {
         $parseOptions->outputTZX = true;
+    }
+    if (array_key_exists("F",$a) )
+    {
+        $parseOptions->parseREM = true;
     }
              
 }
@@ -785,6 +811,8 @@ function prependLambdaTapeHeader(&$parseOptions,$sinclairBasic)
     //Set D_File size, Lambda always has a full sized D-FILE
     $D_FILE_SIZE = 0x0318;
 
+    $VARS_SIZE = 1;
+
     // Make sysvars: 116 bytes from 0x4009 (16384) to 16509
     //Create 116 byte array for the header and zero it
     $header=array_fill(0, 116, 0);
@@ -793,11 +821,11 @@ function prependLambdaTapeHeader(&$parseOptions,$sinclairBasic)
     echo "File size is: ".$fileSize.PHP_EOL;
     //Skip 	Version
     $header[0] = 0xFF; //VERSN - 16393 - 1 Byte - 00h=ZX81, FFh=Lambda
-    $header[1] = 0x7D; //D_FILE Address - 16394 - 1 Word
+    $header[1] = 0x7D; //D_FILE Address - 16509 - 1 Word
     $header[2] = 0x40; //
     $header[3] = ($programStartAddress & 0x00FF); //PROGRAM - 16396 - 1 Word = 17302
     $header[4] = ($programStartAddress & 0xFF00)>>8;
-    $header[5] = 0x7D; //DF-CC - Address of print position in display file - 16398 - 1 Word -
+    $header[5] = 0x7D; //DF-CC - Address of print position in display file - 16509 - 1 Word -
     $header[6] = 0x40; //
     $header[7] = (($programStartAddress + $fileSize+ 1) & 0x00FF); //VARS - 16400 - 1 Word
     $header[8] = (($programStartAddress + $fileSize+ 1) & 0xFF00)>>8;//
@@ -860,7 +888,6 @@ function prependLambdaTapeHeader(&$parseOptions,$sinclairBasic)
     //Now write an empty display buffer
     //Each line of the D_FILE (display file) is 0-32 characters long and ends with a HALT 0x76
     //There are 24 of these lines. A collapsed D_FILE might only ha
-    var_dump($parseOptions->D_FILE);
     for ( $i= 0; $i<24; $i++ )
     {
         //Check if D_FILE has content
@@ -956,12 +983,12 @@ function prependTZXHeader(&$parseOptions)
 
 //-------------------------------------------------Init Functions------------------------------------------------------
 
-function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
+function initArrays(&$keywordArray, &$characterArray, &$controlCodeArray, &$controlCodeValues, &$parseOptions)
 {
     switch ($parseOptions->machineType)
     {
         case "SPECTRUM" :
-            initSpectrumArrays($keywordArray, $characterArray);
+            initSpectrumArrays($keywordArray, $characterArray, $controlCodeArray, $controlCodeValues);
             $parseOptions->subMachine = "SPECTRUM";
             $parseOptions->caseSensitive = true;
             $parseOptions->lineEnding = 0x0D;
@@ -973,7 +1000,7 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
             break;
         
         case "PLUS3" :
-            initSpectrumArrays($keywordArray, $characterArray);
+            initSpectrumArrays($keywordArray, $characterArray, $controlCodeArray, $controlCodeValues);
             $parseOptions->subMachine = "SPECTRUM";
             $parseOptions->caseSensitive = true;
             $parseOptions->lineEnding = 0x0D;
@@ -983,7 +1010,7 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
             break;
         
         case "TIMEX" :
-            initTimexArrays($keywordArray, $characterArray);
+            initTimexArrays($keywordArray, $characterArray, $controlCodeArray, $controlCodeValues);
             $parseOptions->subMachine = "SPECTRUM";
             $parseOptions->caseSensitive = true;
             $parseOptions->lineEnding = 0x0D;
@@ -996,7 +1023,7 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
         
         case "LAMBDA1" :
             //LAMBDA1 is the same as LAMBDA2, except 2 has extra keywords for Colour,etc
-            initLambdaArrays($keywordArray, $characterArray);
+            initLambdaArrays($keywordArray, $characterArray, $controlCodeArray, $controlCodeValues);
             $parseOptions->subMachine = "ZX81";
             $parseOptions->caseSensitive = false;
             $parseOptions->lineEnding = 0x76;
@@ -1006,7 +1033,7 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
             break;
         
         case "LAMBDA2" :
-            initLambda2Arrays($keywordArray, $characterArray);
+            initLambda2Arrays($keywordArray, $characterArray, $controlCodeArray, $controlCodeValues);
             $parseOptions->subMachine = "ZX81";
             $parseOptions->caseSensitive = false;
             $parseOptions->lineEnding = 0x76;
@@ -1016,7 +1043,7 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
             break;
         
         case "NF300" :
-            initNF300Arrays($keywordArray, $characterArray);
+            initNF300Arrays($keywordArray, $characterArray, $controlCodeArray, $controlCodeValues);
             $parseOptions->subMachine = "ZX81";
             $parseOptions->caseSensitive = false;
             $parseOptions->lineEnding = 0x76;
@@ -1026,7 +1053,7 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
             break;
             
         case "ZX80" :
-            initZX80Arrays($keywordArray, $characterArray);
+            initZX80Arrays($keywordArray, $characterArray, $controlCodeArray, $controlCodeValues);
             $parseOptions->subMachine = "ZX80";
             $parseOptions->caseSensitive = false;
             $parseOptions->lineEnding = 0x76;
@@ -1036,7 +1063,7 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
             break;
             
         case "ZX81" :
-            initZX81Arrays($keywordArray, $characterArray);
+            initZX81Arrays($keywordArray, $characterArray, $controlCodeArray, $controlCodeValues);
             $parseOptions->subMachine = "ZX81";
             $parseOptions->caseSensitive = false;
             $parseOptions->lineEnding = 0x76;
@@ -1046,7 +1073,7 @@ function initArrays(&$keywordArray, &$characterArray, &$parseOptions)
             break;
             
         case "NEXT" :
-            initZX81Arrays($keywordArray, $characterArray);
+            initZX81Arrays($keywordArray, $characterArray, $controlCodeArray, $controlCodeValues);
             $parseOptions->subMachine = "SPECTRUM";
             $parseOptions->caseSensitive = true;
             $parseOptions->lineEnding = 0x0D;
@@ -1118,7 +1145,7 @@ function checkOutputFile(&$parseOptions)
     }
 }
 
-function initSpectrumArrays(&$keywordArray, &$characterArray)
+function initSpectrumArrays(&$keywordArray, &$characterArray, &$controlCodeArray, &$controlCodeValues)
 {
     $keywordArray = array(
     
@@ -1215,21 +1242,58 @@ function initSpectrumArrays(&$keywordArray, &$characterArray)
         "COPY"=>255
         );
 
+        $controlCodeArray = array(
+            "COMMA"=>6,
+            "EDIT"=>7,
+            "LEFT"=>8,
+            "RIGHT"=>9,
+            "DOWN"=>10,
+            "UP"=>11,
+            "BKSPC"=>12,
+            "ENT"=>13,
+            "NUMBER"=>14,
+            "INK"=>16,
+            "BLK"=>16,
+            "WHT"=>16,
+            "RED"=>16,
+            "MAG"=>16,
+            "GRN"=>16,
+            "CYN"=>16,
+            "YEL"=>16,
+            "BLU"=>16,
+            "PAPER"=>17,
+            "PBLK"=>17,
+            "PWHT"=>17,
+            "PRED"=>17,
+            "PMAG"=>17,
+            "PGRN"=>17,
+            "PCYN"=>17,
+            "PYEL"=>17,
+            "PBLU"=>17,
+            "FLASH"=>18,
+            "BRIGHT"=>19,
+            "INVERSE"=>20,
+            "OVER"=>21,
+            "OVRON"=>21,
+            "OVROFF"=>21, 
+            "AT"=>22,
+            "TAB"=>23);
+
+        $controlCodeValues = array(
+
+            "BLK"=>0,
+            "WHT"=>7,
+            "RED"=>2,
+            "MAG"=>3,
+            "GRN"=>4,
+            "CYN"=>5,
+            "YEL"=>6,
+            "BLU"=>1,
+            "ON"=>1,
+            "OFF"=>0
+        );
+
         $characterArray = array(
-            "PRINT comma"=>6,
-            "Edit"=>7,
-            "Backspace"=>12,
-            "Enter"=>13,
-            "number"=>14,
-            "Not used"=>15,
-            "INK control"=>16,
-            "PAPER control"=>17,
-            "FLASH control"=>18,
-            "BRIGHT control"=>19,
-            "INVERSE control"=>20,
-            "OVER control"=>21,
-            "AT control"=>22,
-            "TAB control"=>23,
             "SPACE"=>32,
             " "=>32,
             "!"=>33,
@@ -1375,7 +1439,7 @@ function initSpectrumArrays(&$keywordArray, &$characterArray)
 
 }
 
-function initTimexArrays(&$keywordArray, &$characterArray)
+function initTimexArrays(&$keywordArray, &$characterArray, &$controlCodeArray, &$controlCodeValues)
 {
     //Call Spectrum setup and then replace the few keywords that are different
     initSpectrumArrays($keywordArray, $characterArray);
@@ -1387,7 +1451,7 @@ function initTimexArrays(&$keywordArray, &$characterArray)
     $keywordArray += ["ON ERR" => 123, "STICK" => 124, "SOUND" => 125, "FREE" => 126, "RESET" => 127];
 }
 
-function initLambdaArrays(&$keywordArray, &$characterArray)
+function initLambdaArrays(&$keywordArray, &$characterArray, &$controlCodeArray, &$controlCodeValues)
 {
     $characterArray = array(
         "BLANKBLANK"=>0,
@@ -1662,21 +1726,21 @@ function initLambdaArrays(&$keywordArray, &$characterArray)
         "COPY"=>255,
     );
 }
-function initLambda2Arrays(&$keywordArray, &$characterArray)
+function initLambda2Arrays(&$keywordArray, &$characterArray, &$controlCodeArray, &$controlCodeValues)
 {
     //Call Lambda setup and then replace the few keywords that are different
-    initLambdaArrays($keywordArray, $characterArray);
+    initLambdaArrays($keywordArray, $characterArray, $controlCodeArray, $controlCodeValues);
     $keywordArray += ["INK" => 70, "PAPER" => 71, "BORDER" => 72];
 }
 
-function initNF300Arrays(&$keywordArray, &$characterArray)
+function initNF300Arrays(&$keywordArray, &$characterArray, &$controlCodeArray, &$controlCodeValues)
 {
     //Call Lambda2 setup and then replace the few keywords that are different
-    initLambda2Arrays($keywordArray, $characterArray);
+    initLambda2Arrays($keywordArray, $characterArray, $controlCodeArray, $controlCodeValues);
     $keywordArray += ["READ" => 73, "DATA" => 74, "RESTORE" => 75];
 }
 
-function initZX81Arrays(&$keywordArray, &$characterArray)
+function initZX81Arrays(&$keywordArray, &$characterArray, &$controlCodeArray, &$controlCodeValues)
 {
     $characterArray = array(
         "BLANKBLANK"=>0,
@@ -1873,7 +1937,7 @@ function initZX81Arrays(&$keywordArray, &$characterArray)
         "%y"=>190,
         "%Z"=>191,
         "%z"=>191,
-        "“”"=>192,
+        "(A)"=>192,
         "**"=>216,
         "<="=>219,
         ">="=>220,
@@ -1947,7 +2011,7 @@ function initZX81Arrays(&$keywordArray, &$characterArray)
     );
 }
 
-function initZX80Arrays(&$keywordArray, &$characterArray)
+function initZX80Arrays(&$keywordArray, &$characterArray, &$controlCodeArray, &$controlCodeValues)
 {
     $characterArray = array(
         "BLANKBLANK"=>0,
@@ -2062,7 +2126,7 @@ function initZX80Arrays(&$keywordArray, &$characterArray)
         "'."=>136,
         "@@"=>137, //Inverse pixel block
         "!!"=>138, //Inverse pixel top
-        "::"=>139, //Inverse pixel bottom
+        ";;"=>139, //Inverse pixel bottom
         "%£"=>140,
         "%$"=>141,
         "%:"=>142,
@@ -2141,7 +2205,7 @@ function initZX80Arrays(&$keywordArray, &$characterArray)
         "%y"=>190,
         "%Z"=>191,
         "%z"=>191,
-        "“”"=>212,
+        "(A)"=>212,
         ";"=>215,
         "'"=>216,
         ")"=>217,
@@ -2173,6 +2237,7 @@ function initZX80Arrays(&$keywordArray, &$characterArray)
         "INPUT"=>238,
         "RANDOMISE"=>239,
         "RANDOMIZE"=>239,
+        "LET"=>240,
         "NEXT"=>243,
         "PRINT"=>244,
         "NEW"=>246,
@@ -2188,8 +2253,54 @@ function initZX80Arrays(&$keywordArray, &$characterArray)
     );
 }
 
-function initNextArrays(&$keywordArray, &$characterArray)
+function initNextArrays(&$keywordArray, &$characterArray, &$controlCodeArray, &$controlCodeValues)
 {
+
+    $controlCodeArray = array(
+        "PRNTCOMMA"=>6,
+        "EDIT"=>7,
+        "BKSPC"=>12,
+        "ENT"=>13,
+        "NUMBER"=>14,
+        "INK"=>16,
+        "BLK"=>16,
+        "WHT"=>16,
+        "RED"=>16,
+        "MAG"=>16,
+        "GRN"=>16,
+        "CYN"=>16,
+        "YEL"=>16,
+        "BLU"=>16,
+        "PAPER"=>17,
+        "PBLK"=>17,
+        "PWHT"=>17,
+        "PRED"=>17,
+        "PMAG"=>17,
+        "PGRN"=>17,
+        "PCYN"=>17,
+        "PYEL"=>17,
+        "PBLU"=>17,
+        "FLASH"=>18,
+        "BRIGHT"=>19,
+        "INVERSE"=>20,
+        "OVER"=>21,
+        "AT"=>22,
+        "TAB"=>23);
+
+    $controlCodeValues = array(
+
+        "BLK"=>0,
+        "WHT"=>7,
+        "RED"=>2,
+        "MAG"=>3,
+        "GRN"=>4,
+        "CYN"=>5,
+        "YEL"=>6,
+        "BLU"=>1,
+        "ON"=>1,
+        "OFF"=>0
+    );
+
     $keywordArray = array(
     
         "DPEEK"=>138,
@@ -2479,6 +2590,7 @@ function initNextArrays(&$keywordArray, &$characterArray)
 // Parse optional parameters
 $parseOptions= new stdClass();
 $parseOptions->verboseMode = false;
+$parseOptions->parseREM = false;
 $parseOptions->autostartLine = 0x8000;
 $parseOptions->spectrumFilename = "out.tap";
 $parseOptions->outputFilename = DEFAULT_OUTPUT;
@@ -2499,6 +2611,8 @@ $parseOptions->caseSensitive = true; //ZX80,ZX81 and Lambda only do upper case, 
 $parseOptions->firstLineNum = -1;
 $parseOptions->full_D_FILE = true;
 $parseOptions->D_FILE = array();
+$parseOptions->use_VARS = false;
+$parseOptions->VARS = array();
 if ($_SERVER["REQUEST_METHOD"] == "POST") 
 {
     parsePostOptions($_POST, $parseOptions);
@@ -2520,7 +2634,9 @@ else
 //Setup the keywords
 $sinclairBasicKeywords = array();
 $sinclairBasic = array();
-initArrays($sinclairBasicKeywords, $sinclairBasic, $parseOptions);
+$sinclairControlCodes = array();
+$sinclairControlValues = array();
+initArrays($sinclairBasicKeywords, $sinclairBasic, $sinclairControlCodes, $sinclairControlValues, $parseOptions);
 checkOutputFile($parseOptions);
 
 if($parseOptions->verboseMode)echo "Machine Type = ".$parseOptions->machineType." Sub machine type = ".$parseOptions->subMachine.PHP_EOL;
@@ -2571,6 +2687,7 @@ $TempBuffer = [];
 $TempString = "";
 $unSetLines=false;
 
+//-------------------------------------------------------START OF PREPROCESSOR------------------------------------------------------
 //First pass clean up input and sort labels
 if($parseOptions->useLabels) $Linenum=$parseOptions->setLabelsModeStartLineNumber;
 $LabelNumberArray = [];
@@ -2670,6 +2787,18 @@ foreach ($basicLines as $CurrentLine)
                 //Batoco gives an error message and quits
 
                 //These comments are not nestable
+
+                //TO TO
+                //#!basic-vars:A=23¦FATCAT=12¦A$=WHAT a Lovely DAY
+
+                //or
+
+                //#!basic-vars:A=23
+                //#!basic-vars:FATCAT=12
+
+                //#!basic-dim:A$=20¦B$=4
+
+                //Builds an array of variables to store in VARS to reduce the number of basic lines needed
                 $Ptr=strpos($CurrentLine,":");
                 $TempBuffer=strtoupper(substr($CurrentLine,2,$Ptr-2));
                 
@@ -2677,59 +2806,261 @@ foreach ($basicLines as $CurrentLine)
                 switch($TempBuffer)
                 {
                     case "BASIC-START":
-                        if($parseOptions->autostartLine != 0x8000)
-                        { 
-                            Warning("AutoStart line set by parameters, about to be overridden in Line no".$currentLineNum);
-                        }
-                        if($parseOptions->useLabels)
+                        if($unSetLines==false)
                         {
-                            //If using labels store label and we will adjust it once we have processed all labels
-                            $parseOptions->autostartLine=substr($CurrentLine,$Ptr+1);
+
+                            if($parseOptions->autostartLine != 0x8000)
+                            { 
+                                Warning("AutoStart line set by parameters, about to be overridden in Line no".$currentLineNum);
+                            }
+                            if($parseOptions->useLabels)
+                            {
+                                //If using labels store label and we will adjust it once we have processed all labels
+                                $parseOptions->autostartLine=substr($CurrentLine,$Ptr+1);
+                            }
+                            else
+                            {
+                                //If not using labels store the line number value
+                                $parseOptions->autostartLine=(int)substr($CurrentLine,$Ptr+1);
+                            }
+                            //Set $parseOptions->autostartLine to number given
+                            if($parseOptions->verboseMode)echo "Setting autostart line, Line No. ".$currentLineNum.PHP_EOL;
                         }
-                        else
+                        break;
+                    case "BASIC-VARS":
+                        if($unSetLines==false)
                         {
-                            //If not using labels store the line number value
-                            $parseOptions->autostartLine=(int)substr($CurrentLine,$Ptr+1);
+
+                            $parseOptions->use_VARS = true;
+                            //Get list of variables
+                            $VariableList=explode("¦",strtoupper(trim(substr($CurrentLine,$Ptr+1))));
+                            //For each variable
+                            foreach ( $VariableList AS $Variable )
+                            {
+                                
+                        //TO DO
+                                $TempPos = strpos($Variable,"=");
+                                //Does the part before the equals sign end in a $ sign
+                                if($Variable[$TempPos-1] == "$")
+                                {
+                                    //If yes is the part before the $ sign a letter and is it only one char long
+                                    $variableName = strtok($Variable, '$');
+                                    if(strlen($variableName)>1)
+                                        Error("String variable name ".$variableName." longer than one character");
+                                    if(isalpha($variableName))
+                                    {
+                                        //If yes 
+                                            // get character set value of letter AND it with 0x40 add to VARS array
+                                            
+                                            $parseOptions->VARS[] = (($sinclairBasic[$variableName]) & 0x40);
+                                            //Get length of string add to VARS, less significant byte first
+                                            $tempString = substr($Variable, $TempPos + 1);
+                                            $tempLength = strlen($tempString);
+                                            $parseOptions->VARS[] = $tempLength & 0x00FF;
+                                            $parseOptions->VARS[] = ($tempLength & 0xFF00)>>8;
+                                            //Convert each character and add to VARS array
+                                            foreach($tempString as $char)
+                                            {   
+                                                $parseOptions->VARS[] = $sinclairBasic[$char];
+                                            }
+
+                                    }
+                                    //If no 
+                                        // give error, not a char
+                                    else
+                                        Error("String variable name ".$variableName." is not an alphabetic character");
+                                } 
+                                //If not a $ is it 1 charcter long
+                                else if ($TempPos=1)
+                                {
+                                    
+                                    //If yes
+                                    //If yes is the part before the = sign a letter
+                                    $variableName = strtok($Variable, '=');
+                                    if(isalpha($variableName))
+                                    {
+                                        //Get character set value AND it with 0x60
+                                        //Insert it in VARS array
+                                        $parseOptions->VARS[] = (($sinclairBasic[$variableName]) & 0x60);
+                                        $variableValue = substr($Variable, $TempPos + 1);
+                                        //Is value after the = sign a number
+                                        if (is_numeric($variableValue))
+                                        {
+                                            //If so
+                                            //Convert with fexp add result to VARS array 
+                                            $exponentMantissaArray = frexp($variableValue,$parseOptions->subMachine);
+                                            foreach($exponentMantissaArray as $element)
+                                            {
+                                                $parseOptions->VARS[] = $element;
+                                            }
+                                            $exponentMantissaArray =[];
+
+                                        }
+                                        //If not
+                                            //Error not a number
+                                        else
+                                        Error("Variable name ".$variableName." doesn't contain numeric value");
+                                    }
+                                    //If no 
+                                        // give error, not a char
+                                    else
+                                        Error("String variable name ".$variableName." is not an alphabetic character");
+                                }
+                                //If no
+                                else
+                                {
+
+                                    
+                                    $variableName = strtok($Variable, '=');
+                                    if(isalpha($variableName))
+                                    {
+                                        //Get first character set value AND it with 0xA0 add to VARS array
+                                        //Get character set value of each character add to VARS array
+                                        //For last character get char set value AND it with 0x80 add to array
+                                        $ptr = 0;
+                                        $parseOptions->VARS[] = (($sinclairBasic[$variableName[$ptr]]) & 0xA0);
+                                        while($ptr<strlen($variableName)+1)
+                                        {
+                                            $parseOptions->VARS[] = ($sinclairBasic[$variableName[$ptr]]);
+                                            $ptr++;
+                                        }
+                                        $parseOptions->VARS[] = (($sinclairBasic[$variableName[$ptr]]) & 0x80);
+                                        $variableValue = substr($Variable, $TempPos + 1);
+                                        //Is value after the = sign a number
+                                        if (is_numeric($variableValue))
+                                        {
+                                            //If so
+                                            //Convert with fexp add result to VARS array 
+                                            $exponentMantissaArray = frexp($variableValue,$parseOptions->subMachine);
+                                            foreach($exponentMantissaArray as $element)
+                                            {
+                                                $parseOptions->VARS[] = $element;
+                                            }
+                                            $exponentMantissaArray =[];
+
+                                        }
+                                        //If not
+                                            //Error not a number
+                                        else
+                                        Error("Variable name ".$variableName." doesn't contain numeric value");
+                                    }
+                                    //If no 
+                                        // give error, not a char
+                                    else
+                                        Error("String variable name ".$variableName." is not an alphabetic character");
+                                } 
+                                
+                                    
+                            }
+                            
+                            
+                            //Next we need to go through each variable and convert the text to current machine character set and add to VARS array
+                            //$parseOptions->VARS = array();
+                            //Then we need to add the value to the VARS array properly converted
                         }
-                        //Set $parseOptions->autostartLine to number given
-                        if($parseOptions->verboseMode)echo "Setting autostart line, Line No. ".$currentLineNum.PHP_EOL;
+                        break;
+                    case "BASIC-DIM":
+                        if($unSetLines==false)
+                        {
+    
+                            $parseOptions->use_VARS = true;
+                            //Get list of variables
+                            $MachineList=explode(",",strtoupper(trim(substr($CurrentLine,$Ptr+1))));
+                            //For each variable
+                        //TO DO
+                        }
+                        break;
+                    case "BASIC-ARRAY":
+                        if($unSetLines==false)
+                        {
+        
+                            $parseOptions->use_VARS = true;
+                            //Get list of variables
+                            $MachineList=explode(",",strtoupper(trim(substr($CurrentLine,$Ptr+1))));
+                            //For each variable
+                        //TO DO
+                        }
+                        break;
+                    
+                    case "VAR-ALIAS":
+                        //Get list of aliases
+                        $AliasList=explode(",",strtoupper(trim(substr($CurrentLine,$Ptr+1))));
+                        //TO DO
+                        //Build array of aliases
+                        //On next run through replace all instances of variables with aliases
                         break;
                     case "DFILE":
-                        //Add contents after : to a new line of the D_FILE
-                        $Ptr++; //Skip :
-                        $parseOptions->full_D_FILE = true;
-                        //Clear TempBuffer
-                        $TempBuffer=[];
-                        
-                        while($Ptr < strlen($CurrentLine))
+                        if($unSetLines==false)
                         {
-                            $TempBuffer[] = $sinclairBasic[$CurrentLine[$Ptr]];
-                            $Ptr++;
-                        }
-                        //Check line length
-                        if(count($TempBuffer) > 32)
-                            Error("Line is too long for D_FILE line. Line No. ".$currentLineNum);
-                        
-                        //Pad line to 32 characters
-                        $TempBuffer = array_pad($TempBuffer,32,$sinclairBasic[" "]);
-                        //Add line to D_FILE
-                        $parseOptions->D_FILE[] = $TempBuffer;
 
-                        if($parseOptions->verboseMode)echo "Adding line '".implode($TempBuffer)."' to D_FILE, Line No. ".$currentLineNum.PHP_EOL;
+                            //Add contents after : to a new line of the D_FILE
+                            $Ptr++; //Skip :
+                            $parseOptions->full_D_FILE = true;
+                            //Clear TempBuffer
+                            $TempBuffer=[];
+                            
+                            while($Ptr < strlen($CurrentLine))
+                            {
+                                if($CurrentLine[$Ptr] == "\\")
+                                {
+                                    switch($CurrentLine[$Ptr+1])
+                                    {
+                                        //case "\\":
+                                        case "%": //Inverse characters
+                                            $TempBuffer[] = $sinclairBasic[$CurrentLine[$Ptr+1].$CurrentLine[$Ptr+2]];
+                                            $Ptr = $Ptr + 2;
+                                            break; 
+                                        case "&": //"" character
+                                            $TempBuffer[] = $sinclairBasic["(A)"];
+                                            $Ptr = $Ptr + 2;
+                                            break; 
+                                        case '\'': case '.': case ':': case ' ': case "'": case '!': case '>': case '<':case '#':case '~':case ')': case '(':case '@':// block graphics char
+                                            //echo ($CurrentLine[$Ptr+1]==" "?"BLANK":$CurrentLine[$Ptr+1]).($CurrentLine[$Ptr+2]==" "?"BLANK":$CurrentLine[$Ptr+2])." returns ".$sinclairBasic[($CurrentLine[$Ptr+1]==" "?"BLANK":$CurrentLine[$Ptr+1]).($CurrentLine[$Ptr+2]==" "?"BLANK":$CurrentLine[$Ptr+2])].PHP_EOL;
+                                            $TempBuffer[] = $sinclairBasic[($CurrentLine[$Ptr+1]==" "?"BLANK":$CurrentLine[$Ptr+1]).($CurrentLine[$Ptr+2]==" "?"BLANK":$CurrentLine[$Ptr+2])];
+                                            $Ptr = $Ptr + 2;
+                                            break;
+                                    }
+                                }
+                                else
+                                    $TempBuffer[] = $sinclairBasic[$CurrentLine[$Ptr]];
+                                $Ptr++;
+                            }
+                            
+                            //Check line length
+                            if(count($TempBuffer) > 32)
+                                Error("Line is too long for D_FILE line. Line No. ".$currentLineNum);
+                            
+                            //Pad line to 32 characters
+                            $TempBuffer = array_pad($TempBuffer,32,$sinclairBasic[" "]);
+                            //Add line to D_FILE
+                            $parseOptions->D_FILE[] = $TempBuffer;
+
+                            if($parseOptions->verboseMode)echo "Adding line '".implode($TempBuffer)."' to D_FILE, Line No. ".$currentLineNum.PHP_EOL;
+                        }
                         break;
                     case "DFILE-COLLAPSED": 
-                        //Check if D_FILE is actually empty if not warn that d_file is not empty
-                        if(!empty($parseOptions->D_FILE))
-                            Warning("D_FILE collapse requested, but D_FILE has content. Request ignored, Line No. ".$currentLineNum);
-                        else
-                            //Set D_FILE collapsed
-                            $parseOptions->full_D_FILE = false;
-                        
-                        if($parseOptions->verboseMode)echo "Collapsing D_FILE, Line No. ".$currentLineNum.PHP_EOL;
+                        if($unSetLines==false)
+                        {
+                            //Check if D_FILE is actually empty if not warn that d_file is not empty
+                            if(!empty($parseOptions->D_FILE))
+                                Warning("D_FILE collapse requested, but D_FILE has content. Request ignored, Line No. ".$currentLineNum);
+                            else
+                                //Set D_FILE collapsed
+                                $parseOptions->full_D_FILE = false;
+                            
+                            if($parseOptions->verboseMode)echo "Collapsing D_FILE, Line No. ".$currentLineNum.PHP_EOL;
+                        }
                         break;
+                    case "PARSE-REM":  
+                        if($unSetLines==false)
+                        {
+                               
+                            $parseOptions->parseREM = true;
+                        }
+                        break;    
                     case "MACHINE":
                         //Get list of machines
-                        $MachineList=explode(",",strtoupper(substr($CurrentLine,$Ptr+1)));
+                        $MachineList=explode(",",strtoupper(trim(substr($CurrentLine,$Ptr+1))));
                         //var_dump($MachineList);
                         //Check if current machine is in specified list
                         if(in_array($parseOptions->machineType,$MachineList))
@@ -2748,10 +3079,10 @@ foreach ($basicLines as $CurrentLine)
                         break;
                     case "MACHINE-SUB-TYPE":
                         //Get list of machines
-                        $MachineList=explode(",",strtoupper(substr($CurrentLine,$Ptr+1)));
+                        $MachineList=explode(",",strtoupper(trim(substr($CurrentLine,$Ptr+1))));
                         //var_dump($MachineList);
                         //Check if current machine is in specified list
-                        if(in_array($parseOptions->machine,$MachineList))
+                        if(in_array($parseOptions->subMachine,$MachineList))
                         {
                             if($parseOptions->verboseMode)echo "Machine in include list Line No. ".$currentLineNum.PHP_EOL;
                             //For an include case just need to remove end-machine, so nothing more to do
@@ -2767,7 +3098,7 @@ foreach ($basicLines as $CurrentLine)
                         break;
                     case "MACHINE-NOT":
                         //Get list of machines
-                        $MachineList=explode(",",strtoupper(substr($CurrentLine,$Ptr+1)));
+                        $MachineList=explode(",",strtoupper(trim(substr($CurrentLine,$Ptr+1))));
                         //var_dump($MachineList);
                         if(!in_array($parseOptions->machineType,$MachineList))
                         {
@@ -2785,7 +3116,7 @@ foreach ($basicLines as $CurrentLine)
                     
                     case "MACHINE-NOT-SUB-TYPE":
                         //Get list of machines
-                        $MachineList=explode(",",strtoupper(substr($CurrentLine,$Ptr+1)));
+                        $MachineList=explode(",",strtoupper(trim(substr($CurrentLine,$Ptr+1))));
                         //var_dump($MachineList);
                         if(!in_array($parseOptions->subMachine,$MachineList))
                         {
@@ -2861,15 +3192,18 @@ foreach ($basicLines as $CurrentLine)
 
             break;
         default:
-            // If using labels add line number
-            if($parseOptions->useLabels)
+            if($unSetLines==false)
             {
-                $TempString = (string)$Linenum . " " . $CurrentLine;
-                $basicLines[$currentLineNum] = $TempString;
-                
-                if($parseOptions->verboseMode)echo "Processed: ",$currentLineNum,PHP_EOL;
-                //If using labels increment linenumber
-                if($parseOptions->useLabels) $Linenum = $Linenum+$parseOptions->setLabelModeIncrement; 
+                // If using labels add line number
+                if($parseOptions->useLabels)
+                {
+                    $TempString = (string)$Linenum . " " . $CurrentLine;
+                    $basicLines[$currentLineNum] = $TempString;
+                    
+                    if($parseOptions->verboseMode)echo "Processed: ",$currentLineNum,PHP_EOL;
+                    //If using labels increment linenumber
+                    if($parseOptions->useLabels) $Linenum = $Linenum+$parseOptions->setLabelModeIncrement; 
+                }
             }
     }
     //If we are here it should be a line of code check if it needs deleting
@@ -2893,6 +3227,7 @@ if($parseOptions->useLabels)
     }
 }
 
+//-------------------------------------------------------END OF PREPROCESSOR------------------------------------------------------
 echo "\n\n";
 $currentLineNum = 0;
 //We now need a second pass to replace labels with line numbers
@@ -2909,7 +3244,7 @@ if($parseOptions->useLabels)
 $currentLineNum = 0;
 $Linenum = 0;
 $TempPtr = 0;
-//var_dump($basicLines);
+var_dump($basicLines);
 
 //Open output file
 $OutputFile = fopen($parseOptions->outputFilename,"w") or die("Unable to open file!");
@@ -3034,8 +3369,8 @@ foreach ($basicLines as $CurrentLine)
                                     break;
                                 default:
                                     Warning("line: " . $currentLineNum .  "unknown escape charater  " . $CurrentLine[$Ptr] . $CurrentLine[$Ptr+1] . " inserting literally");
-                                    $TempBuffer[] =  $CurrentLine[$Ptr];
-                                    $TempBuffer[] =  $CurrentLine[$Ptr+1];
+                                    $TempBuffer[] =  $sinclairBasic[$CurrentLine[$Ptr]];
+                                    $TempBuffer[] =  $sinclairBasic[$CurrentLine[$Ptr+1]];
                                     $Ptr = $Ptr + 2;
                                     continue 3;
                                     break;
@@ -3051,6 +3386,11 @@ foreach ($basicLines as $CurrentLine)
                                 $Ptr = $Ptr + 3;
                                 continue 3;
                                 break; 
+                            case "&": //"" character
+                                $TempBuffer[] = $sinclairBasic["(A)"];
+                                $Ptr = $Ptr + 3;
+                                continue 3;
+                                break; 
                             case '\'': case '.': case ':': case ' ': case "'": case '!': case '>': case '<':case '#':case '~':case ')': case '(':case '@':// block graphics char
                                 //echo ($CurrentLine[$Ptr+1]==" "?"BLANK":$CurrentLine[$Ptr+1]).($CurrentLine[$Ptr+2]==" "?"BLANK":$CurrentLine[$Ptr+2])." returns ".$sinclairBasic[($CurrentLine[$Ptr+1]==" "?"BLANK":$CurrentLine[$Ptr+1]).($CurrentLine[$Ptr+2]==" "?"BLANK":$CurrentLine[$Ptr+2])].PHP_EOL;
                                 $TempBuffer[] = $sinclairBasic[($CurrentLine[$Ptr+1]==" "?"BLANK":$CurrentLine[$Ptr+1]).($CurrentLine[$Ptr+2]==" "?"BLANK":$CurrentLine[$Ptr+2])];
@@ -3062,6 +3402,63 @@ foreach ($basicLines as $CurrentLine)
 
                 }
                 
+            }
+            //Deal with control codes
+            if($CurrentLine[$Ptr] == "{")
+            {
+                $TextBuffer=substr($CurrentLine,$Ptr+1);
+                $controlCode=strtoupper(substr($TextBuffer,0,strpos($TextBuffer,"}")));
+                //Move pointer on string length plus delimiters
+                $Ptr=$Ptr+(strlen($controlCode)+2);
+                $TextBuffer="";
+                switch($controlCode)
+                {
+                    case 'BLK': case 'WHT': case 'RED': case 'MAG': case 'GRN': case 'CYN': case 'YEL': case 'BLU': 
+                        if(array_key_exists($controlCode,$sinclairControlCodes))
+                        {
+                            $TempBuffer[] = $sinclairControlCodes[$controlCode];
+                            $TempBuffer[] = $sinclairControlValues[$controlCode];
+                            echo $controlCode;
+                        }
+                        continue 2;
+                    case 'PBLK': case 'PWHT': case 'PRED': case 'PMAG': case 'PGRN': case 'PCYN': case 'PYEL': case 'PBLU': 
+                        if(array_key_exists($controlCode,$sinclairControlCodes))
+                        {
+                            $TempBuffer[] = $sinclairControlCodes[$controlCode];
+                            $TempBuffer[] = $sinclairControlValues[substr($controlCode,1)];
+                        }
+                        continue 2;
+                    case 'RVON': case 'RVOFF': case 'FLON': case 'FLOFF': case 'BRON': case 'BROFF': case 'OVRON': case 'OVROFF': 
+                        if(array_key_exists($controlCode,$sinclairControlCodes))
+                        {
+                            $TempBuffer[] = $sinclairControlCodes[$controlCode];
+                            // If control code contains ON add value 1 or else 0
+                            if (strpos($controlCode, "ON") === false)
+                                $TempBuffer[] = 0;
+                            else
+                                $TempBuffer[] = 1;
+                        }
+                        continue 2;
+                    default:
+                    //This could be the ones that take parameters like AT, TAB, PAPER and INK or others like EDIT, etc
+                        $tempCodeArray  = explode("=",$controlCode);
+                        if(array_key_exists($tempCodeArray[0],$sinclairControlCodes))
+                        {
+                            $TempBuffer[] = $sinclairControlCodes[$tempCodeArray[0]];
+                        }
+                        //Do we have a parameter?
+                        if(array_key_exists(1,$tempCodeArray))
+                        {
+                            //Get first parameter
+                            $tempCodeArray=explode(",",$tempCodeArray[1]);
+                            $TempBuffer[] = (int)$tempCodeArray[0];
+                            //Do we have a second?
+                            if(array_key_exists(1,$tempCodeArray))  
+                                $TempBuffer[] = (int)$tempCodeArray[1]; 
+                        }
+                        var_dump($first_token, $second_token);
+                        continue 2;
+                }
             }
             if($parseOptions->caseSensitive == true)
             {
@@ -3095,7 +3492,7 @@ foreach ($basicLines as $CurrentLine)
                     /*if($Ptr < strlen($CurrentLine)-1)
                         $Ptr++;
                     else
-                        continue;*/
+                        continue ;*/
                     //The code commented out above should prevent out of range errors which it does
                     //However it generates an extra character on the end of the line after $ characters
                     //For now we just $Ptr++
@@ -3105,21 +3502,25 @@ foreach ($basicLines as $CurrentLine)
             }
             
             if($parseOptions->verboseMode)echo "Current Buffer State: ".strtoupper($TextBuffer).PHP_EOL;
-            //Check if REM, if so record keyword and then transfer everything after REM to $TempBuffer and continue
-            if(strtoupper($TextBuffer) == "REM")
+            //Check if REM, if so record keyword and then transfer everything after REM to $TempBuffer and continue, unless $parseOptions->parseREM = true
+            
+            if($parseOptions->parseREM == false)
             {
-                $TempBuffer[] =  $sinclairBasicKeywords[strtoupper($TextBuffer)];
-                //Eat one more space
-                $Ptr++;
-                while($Ptr < strlen($CurrentLine))
+                if(strtoupper($TextBuffer) == "REM")
                 {
-                    $TempBuffer[] = $sinclairBasic[$CurrentLine[$Ptr]];
-                    if($parseOptions->verboseMode)echo "Current Character = ".$sinclairBasic[$CurrentLine[$Ptr]].PHP_EOL;
+                    $TempBuffer[] =  $sinclairBasicKeywords[strtoupper($TextBuffer)];
+                    //Eat one more space
                     $Ptr++;
+                    while($Ptr < strlen($CurrentLine))
+                    {
+                        $TempBuffer[] = $sinclairBasic[$CurrentLine[$Ptr]];
+                        if($parseOptions->verboseMode)echo "Current Character = ".$sinclairBasic[$CurrentLine[$Ptr]].PHP_EOL;
+                        $Ptr++;
+                    }
+                    if($parseOptions->verboseMode)echo "Found keyword: ".strtoupper($TextBuffer).PHP_EOL;
+                    //Now jump to next line
+                    continue;
                 }
-                if($parseOptions->verboseMode)echo "Found keyword: ".strtoupper($TextBuffer).PHP_EOL;
-                //Now jump to next line
-                continue;
             }
             //Check if it is GO, if so keep GOing for TO or SUB
             if(strcasecmp($TextBuffer,"GO") == 0)
